@@ -1,0 +1,9 @@
+[project]
+name = "psng"
+version = "1.0.0"
+description = "Unsupervised clustering of polysomnography signal windows"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,48 @@
+# PSNG pipeline settings. Relative paths resolve against the working directory.
+
+data:
+  channel: DEBIT                 # nasal airflow channel
+  window_seconds: 30
+  hop_seconds: 0                 # 0 = non-overlapping windows
+  smoothing_seconds: 0.5         # moving-average kernel applied before per-window normalisation
+  training:
+    file_path: C:/Users/Precision/Onus/Polysomnography/Data/patient-8/p8n1.edf
+    start_seconds: 0
+    end_seconds: 10800
+  validation:
+    file_path: C:/Users/Precision/Onus/Polysomnography/Data/patient-8/P8N2.edf
+    start_seconds: 0
+    end_seconds: 10800
+
+features:
+  extractor: freqtimepatt        # freqtimepatt | basic | hjorth | wavelet | bandpass
+  scale: true                    # z-score features (fitted on training) before selection / reduction
+  selection:
+    type: none                   # none | pca | correlation
+    pca_loading: 0.5
+    pca_variance: 0.9
+    correlation_method: pearson
+    correlation_threshold: 0.9
+  reduction:
+    type: pca                    # none | pca
+    n_components: 3
+
+models:                          # one entry per clusterer; values are constructor arguments
+  kmeans:
+    n_clusters: 8
+  # minibatch: {n_clusters: 8}
+  # bisecting: {n_clusters: 9, bisecting_strategy: biggest_inertia}
+  # gmm: {n_components: 9}
+  # dbscan: {eps: 0.5, min_samples: 5}
+  # kdtree: {radius: 0.5, min_cluster_size: 5}
+  # isolation: {contamination: 0.1, eps: 0.5, min_samples: 5}
+
+run:
+  output_dir: outputs
+  log_dir: logs
+  log_level: INFO
+  resume: true                   # reuse cached features, the fitted transformer and models when settings match
+  n_jobs: -1                     # parallel workers for feature extraction (-1 = all cores)
+  chunk_windows: 64              # windows per checkpoint flush
+  interactive_plots: true        # also write a Plotly HTML per model
+  plot_max_points: 100000        # signal is decimated to this many points in HTML plots (~9 MB files)
