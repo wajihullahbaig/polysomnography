@@ -63,6 +63,11 @@ class EventSummary(BaseModel):
     ahi: float | None = None  # apneas + hypopneas starting in sleep, per hour of sleep (needs a hypnogram)
     event_window_fraction: float  # windows labelled apnea or hypopnea
     baseline_amplitude: float  # median 1 Hz envelope of the segment, in signal units
+    # SpO2 reference (when the oximetry channel is present)
+    desaturations: int | None = None  # >= 3 % desaturations over the whole recording
+    odi: float | None = None  # desaturations in sleep per hour of sleep
+    confirmed_fraction: float | None = None  # share of apneas / hypopneas in sleep followed by a desaturation
+    ahi_confirmed: float | None = None  # apneas + desaturation-confirmed hypopneas per hour of sleep (AASM 1A without arousals)
 
 
 def feature_matrix(frame: pd.DataFrame) -> pd.DataFrame:

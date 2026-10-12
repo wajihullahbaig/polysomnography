@@ -37,6 +37,21 @@ events:                          # rule-based airflow events used as the externa
   baseline_seconds: 600          # rolling median window for the local breathing amplitude
   min_overlap_seconds: 5         # a window takes an event label when it overlaps the event this long
 
+oximetry:                        # SpO2 desaturations: an airflow-independent check of the events (channel: null disables)
+  channel: SAT
+  valid_range: [50, 100]         # values outside are probe-off dropouts
+  max_gap_seconds: 10            # shorter dropouts are interpolated
+  drop_percent: 3                # desaturation: SpO2 >= 3 % below the maximum of the preceding lookback (AASM 3 % rule)
+  lookback_seconds: 60
+  min_seconds: 3
+  lag_seconds: 45                # a nadir up to 45 s after an event end confirms it (median measured lag: 18 s)
+
+hmm:                             # hidden Markov model detector: states learned on night 1, Viterbi on both nights
+  n_states: 3                    # reduced flow / normal breathing / large breaths
+  smoothing_seconds: 5           # moving mean over about one breath before the log
+  max_iter: 100                  # Baum-Welch iterations
+  tol: 0.0001                    # log-likelihood gain per second that stops the fit
+
 models:                          # one entry per clusterer; values are constructor arguments
   kmeans: {n_clusters: 5}
   minibatch: {n_clusters: 5}

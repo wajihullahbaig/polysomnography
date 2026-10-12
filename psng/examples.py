@@ -109,7 +109,7 @@ def load_recordings(settings: Settings) -> dict[str, Recording]:
 
 
 def example_figures(settings: Settings, models: list[str], n: int = 3, recordings: dict[str, Recording] | None = None) -> list[Path]:
-    """Write comparison/event_examples.png and comparison/<model>_examples.png; returns the written paths."""
+    """Write comparison/rules_examples.png and comparison/<model>_examples.png; returns the written paths."""
     output_dir = settings.run.output_dir
     recordings = load_recordings(settings) if recordings is None else recordings
     if not recordings:
@@ -117,8 +117,8 @@ def example_figures(settings: Settings, models: list[str], n: int = 3, recording
     comparison = output_dir / "comparison"
     comparison.mkdir(parents=True, exist_ok=True)
     written = []
-    path = comparison / "event_examples.png"
-    save_examples_grid(event_examples(recordings, n), f"Example airflow slices per detected event kind ({settings.data.channel}, baseline units)", path)
+    path = comparison / "rules_examples.png"
+    save_examples_grid(event_examples(recordings, n), "Rules: example airflow per event kind (shaded = the event; 1 = typical breath size)", path)
     written.append(path)
     for model in models:
         frames = {stage: pd.read_csv(output_dir / stage / "csvs" / f"{model}.csv") for stage in recordings
@@ -131,7 +131,7 @@ def example_figures(settings: Settings, models: list[str], n: int = 3, recording
             p = pd.read_csv(profile)
             names = dict(zip(p["cluster_id"].astype(int), p["name"].astype(str)))
         path = comparison / f"{model}_examples.png"
-        save_examples_grid(cluster_examples(recordings, frames, names, n), f"{model}: example windows per cluster (window shaded grey, events by kind)", path)
+        save_examples_grid(cluster_examples(recordings, frames, names, n), f"{model}: example windows per group (grey = the 30 s window, orange / red = rule events)", path)
         written.append(path)
     return written
 

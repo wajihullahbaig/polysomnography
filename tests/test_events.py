@@ -147,7 +147,8 @@ def test_pipeline_with_events_hypnogram_names_report_and_sweep(tmp_path, monkeyp
     markdown = build_report(out, tmp_path / "docs", settings)
     assert "| algorithm |" in markdown and "training" in markdown and "validation" in markdown
     assert "Kalman baseline" in markdown and (out / "comparison" / "baselines.csv").exists() and (out / "comparison" / "kalman.png").exists()
-    for name in ("metrics.png", "event_rates.png", "event_examples.png", "kmeans_examples.png", "dbscan_examples.png", "report.md"):
+    for name in ("metrics.png", "event_rates.png", "rules_examples.png", "kmeans_examples.png", "dbscan_examples.png", "report.md",
+                 "rules_card.png", "kmeans_card.png", "hmm_card.png", "xgboost_card.png", "hmm_examples.png", "xgboost_examples.png"):
         assert (out / "comparison" / name).exists()
     assert (tmp_path / "docs" / "figures" / "training_kmeans_timeline.png").exists()
 

@@ -75,6 +75,27 @@ class EventSettings(BaseModel):
     min_overlap_seconds: float = Field(5.0, ge=0)  # a window is labelled with an event it overlaps at least this long
 
 
+class OximetrySettings(BaseModel):
+    """SpO2 desaturations (`psng/oximetry.py`): an airflow-independent reference for the breathing events."""
+
+    channel: str | None = "SAT"  # SpO2 channel in %; None disables the oximetry reference
+    valid_range: tuple[float, float] = (50.0, 100.0)  # values outside are probe-off dropouts
+    max_gap_seconds: float = Field(10.0, ge=0)  # shorter dropouts are interpolated
+    drop_percent: float = Field(3.0, gt=0)  # desaturation: SpO2 this far below the preceding maximum (AASM: >= 3 %)
+    lookback_seconds: float = Field(60.0, gt=0)  # window of that preceding maximum
+    min_seconds: float = Field(3.0, gt=0)  # minimum desaturation duration
+    lag_seconds: float = Field(45.0, ge=0)  # a nadir up to this long after an event end confirms the event (circulation delay)
+
+
+class HmmSettings(BaseModel):
+    """Gaussian hidden Markov model on the smoothed log flow ratio (`psng/hmm.py`), fitted on the training night."""
+
+    n_states: int = Field(3, ge=2)  # reduced flow / normal breathing / large breaths
+    smoothing_seconds: float = Field(5.0, gt=0)  # moving mean over about one breath before the log
+    max_iter: int = Field(100, ge=1)  # Baum-Welch iterations
+    tol: float = Field(1e-4, gt=0)  # stop when the log-likelihood gain per second falls below this
+
+
 class RunSettings(BaseModel):
     output_dir: Path = Path("outputs")
     log_dir: Path = Path("logs")
@@ -91,6 +112,8 @@ class Settings(BaseModel):
     features: FeatureSettings
     models: dict[str, dict[str, Any]] = Field(min_length=1)
     events: EventSettings = Field(default_factory=EventSettings)
+    oximetry: OximetrySettings = Field(default_factory=OximetrySettings)
+    hmm: HmmSettings = Field(default_factory=HmmSettings)
     run: RunSettings = Field(default_factory=RunSettings)
 
     @field_validator("models", mode="before")

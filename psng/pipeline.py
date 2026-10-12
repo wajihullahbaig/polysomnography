@@ -4,7 +4,9 @@ Training:   EDF -> windows -> features (cached per chunk) -> fit transformer -> 
 Validation: EDF -> windows -> features (cached per chunk) -> load transformer -> load models -> outputs
 
 Both stages also run the rule-based airflow event detector on the recording and, when a hypnogram
-is configured, read the sleep stages; these label every window and score the clusters.
+is configured, read the sleep stages; these label every window and score the clusters. When the
+recording has an SpO2 channel, desaturations are detected and linked to the events (oximetry.py).
+A hidden Markov model on the flow ratio (hmm.py) is fitted on training and decodes both stages.
 """
 
 from __future__ import annotations
@@ -23,8 +25,10 @@ from psng.edf import load_channel
 from psng.events import (baseline_variants, cluster_profile, detect_events, event_summary, flow_envelope, load_hypnogram, name_clusters,
                          recording_baseline, window_event_labels, window_stages)
 from psng.features import FeatureExtractor, make_extractor
+from psng.hmm import GaussianHMM, fit_hmm, hmm_events
 from psng.log import get_logger
 from psng.metrics import evaluate, format_table, write_metrics
+from psng.oximetry import DESATURATION_COLUMNS, detect_desaturations, event_desaturation, oximetry_summary, spo2_series
 from psng.plots import save_events_overview, save_interactive, save_scatter, save_timeline
 from psng.settings import Settings, Stage
 from psng.transform import FeatureTransformer
@@ -45,6 +49,9 @@ class Paths:
         self.metrics = self.stage_dir / "metrics.json"
         self.events = self.stage_dir / "events.csv"
         self.event_summary = self.stage_dir / "events.json"
+        self.desaturations = self.stage_dir / "desaturations.csv"
+        self.hmm_events = self.stage_dir / "hmm_events.csv"
+        self.hmm_summary = self.stage_dir / "hmm_events.json"
         for folder in (self.models, self.cache, self.csvs, self.plots):
             folder.mkdir(parents=True, exist_ok=True)
 
@@ -96,8 +103,11 @@ class Pipeline:
         envelope = flow_envelope(signal, cfg.smoothing_seconds)
         baseline = recording_baseline(envelope)
         events = detect_events(envelope, self.settings.events)
-        events.to_csv(self.paths.events, index=False)
         hypnogram = load_hypnogram(segment.hypnogram_path) if segment.hypnogram_path else None
+        spo2, desaturations = self.desaturations()
+        if desaturations is not None:
+            events["desaturation"] = event_desaturation(events, desaturations, self.settings.oximetry.lag_seconds)
+        events.to_csv(self.paths.events, index=False)
 
         frame = self.extract_features(signal, baseline if cfg.normalisation == "recording" else None)
         starts, ends = frame[META_COLUMNS[0]].to_numpy(float), frame[META_COLUMNS[1]].to_numpy(float)
@@ -105,17 +115,66 @@ class Pipeline:
         if hypnogram is not None:
             frame["stage"] = window_stages(starts, ends, hypnogram)
         summary = event_summary(self.stage, events, frame["event"].to_numpy(object), None, signal.duration, baseline, hypnogram)
+        if desaturations is not None:
+            summary = summary.model_copy(update=oximetry_summary(events, desaturations, summary.sleep_hours, hypnogram, self.settings.oximetry))
+            self.log.info("oximetry: desaturations=%d odi=%s confirmed events=%s ahi (confirmed hypopneas)=%s", summary.desaturations,
+                          _fmt(summary.odi), _fmt(summary.confirmed_fraction), _fmt(summary.ahi_confirmed))
         self.paths.event_summary.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
         self.log.info("events: apnea=%d hypopnea=%d artefact=%d events/hour=%.1f ahi=%s event windows=%.1f%% (baseline amplitude %.3g)",
                       summary.apnea, summary.hypopnea, summary.artefact, summary.events_per_hour,
                       None if summary.ahi is None else f"{summary.ahi:.1f}", 100 * summary.event_window_fraction, baseline)
-        save_events_overview(envelope, events, hypnogram, baseline, f"{cfg.channel} airflow events ({self.stage})", self.paths.plots / "events.png",
+        self.hmm_detector(envelope, desaturations, hypnogram, frame, signal.duration, baseline)
+        night = "Night 1 (training)" if self.stage == "training" else "Night 2 (validation)"
+        save_events_overview(envelope, events, hypnogram, baseline, f"{night} at a glance: breathing, events, oxygen and sleep", self.paths.plots / "events.png", spo2=spo2,
                              baselines=baseline_variants(envelope["envelope"].to_numpy(float), self.settings.events))
 
         features = feature_matrix(frame)
         X = self.transformer(features).transform(features)
         self.log.info("clustering %d windows x %d columns %s", *X.shape, list(X.columns))
         return Prepared(signal, envelope, baseline, events, hypnogram, frame, X)
+
+    def desaturations(self) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        """1 Hz SpO2 and its desaturations (also written to desaturations.csv); (None, None) without an oximetry channel."""
+        cfg, segment = self.settings.oximetry, self.settings.segment(self.stage)
+        if cfg.channel is None:
+            return None, None
+        try:
+            spo2 = load_channel(segment.file_path, cfg.channel, segment.start_seconds, segment.end_seconds)
+        except ValueError as error:
+            self.log.warning("no oximetry reference: %s", error)
+            return None, None
+        series = spo2_series(spo2, cfg)
+        desaturations = detect_desaturations(series, cfg)
+        desaturations.to_csv(self.paths.desaturations, index=False, columns=DESATURATION_COLUMNS)
+        return series, desaturations
+
+    def hmm_detector(self, envelope: pd.DataFrame, desaturations: pd.DataFrame | None, hypnogram: pd.DataFrame | None,
+                     frame: pd.DataFrame, duration: float, baseline: float) -> pd.DataFrame:
+        """HMM events of the stage (hmm_events.csv / .json); the model is fitted on training and only applied to validation."""
+        path, key = self.paths.models / "hmm.pkl", {"hmm": self.settings.hmm.model_dump(), "events": self.settings.events.model_dump()}
+        model = GaussianHMM.load(path) if path.exists() else None
+        if model is None and self.stage == "validation":
+            raise FileNotFoundError(f"no trained HMM {path}; run training first")
+        if self.stage == "training" and (model is None or not self.resume or getattr(model, "settings_", None) != key):
+            t0 = time.perf_counter()
+            model = fit_hmm(envelope["envelope"].to_numpy(float), self.settings.events, self.settings.hmm)
+            model.settings_ = key
+            model.save(path)
+            self.log.info("hmm: fitted %d states in %d iterations (%.1fs): mean flow %s, stay %s, names %s", model.n_states, model.n_iter_,
+                          time.perf_counter() - t0, np.round(model.mean_flow, 2).tolist(), np.round(np.diag(model.transitions_), 3).tolist(), model.names_)
+        events, _ = hmm_events(envelope, model, self.settings.events, self.settings.hmm)
+        if desaturations is not None:
+            events["desaturation"] = event_desaturation(events, desaturations, self.settings.oximetry.lag_seconds)
+        events.to_csv(self.paths.hmm_events, index=False)
+        starts, ends = frame[META_COLUMNS[0]].to_numpy(float), frame[META_COLUMNS[1]].to_numpy(float)
+        labels = window_event_labels(starts, ends, events, self.settings.events.min_overlap_seconds)
+        summary = event_summary(self.stage, events, labels, None, duration, baseline, hypnogram)
+        if desaturations is not None:
+            summary = summary.model_copy(update=oximetry_summary(events, desaturations, summary.sleep_hours, hypnogram, self.settings.oximetry))
+        self.paths.hmm_summary.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+        self.log.info("hmm events: apnea=%d hypopnea=%d artefact=%d ahi=%s confirmed=%s", summary.apnea, summary.hypopnea, summary.artefact,
+                      _fmt(summary.ahi), _fmt(summary.confirmed_fraction))
+        return events
 
     # ----------------------------------------------------------------- features
     def cache_path(self) -> Path:
@@ -197,9 +256,10 @@ class Pipeline:
         out["cluster_label"] = out["cluster_id"].map(names)
         out.to_csv(self.paths.csvs / f"{name}.csv", index=False)
         profile.to_csv(self.paths.csvs / f"{name}_clusters.csv", index=False)
+        night = "night 1" if self.stage == "training" else "night 2"
         title = f"{name} on {prepared.signal.channel} ({self.stage})"
-        save_scatter(values, labels, model.centers_, title, self.paths.plots / f"{name}.png", names)
-        save_timeline(out, prepared.events, f"{title}: cluster per window, events shaded", self.paths.plots / f"{name}_timeline.png", names)
+        save_scatter(values, labels, model.centers_, f"{name}: the groups on a map of all 30 s windows ({night})", self.paths.plots / f"{name}.png", names)
+        save_timeline(out, prepared.events, f"{name}: which group every 30 s of {night} falls in", self.paths.plots / f"{name}_timeline.png", names)
         if self.settings.run.interactive_plots:
             save_interactive(prepared.signal, out, title, self.paths.plots / f"{name}.html", self.settings.run.plot_max_points,
                              events=prepared.events, hypnogram=prepared.hypnogram, names=names)

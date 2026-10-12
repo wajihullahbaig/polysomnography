@@ -94,5 +94,5 @@ def run_supervised(output_dir: Path, model_csv: str) -> SupervisedResult | None:
     comparison.mkdir(parents=True, exist_ok=True)
     (comparison / "supervised.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
     save_supervised(validation, probability, result.validation_auc, result.validation_f1,
-                    f"{result.backend} trained on night-1 rule labels, applied to night 2", comparison / "xgboost.png")
+                    "XGBoost on night 2: how sure the model is that each 30 s window holds an event", comparison / "xgboost.png")
     return result
