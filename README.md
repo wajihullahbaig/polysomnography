@@ -232,13 +232,17 @@ once that blood has travelled to the finger, SpO2 falls a few percent; when brea
 Every other reference here comes from the airflow sensor itself, so SpO2 is the one check the airflow methods
 cannot simply agree with themselves on.
 
-$$\mathrm{SpO_2} = \frac{\mathrm{HbO_2}}{\mathrm{HbO_2} + \mathrm{Hb}} \times 100\,\%$$
+```math
+\mathrm{SpO_2} = \frac{\mathrm{HbO_2}}{\mathrm{HbO_2} + \mathrm{Hb}} \times 100\,\%
+```
 
 with $\mathrm{HbO_2}$ the oxygen-carrying and $\mathrm{Hb}$ the oxygen-free haemoglobin. The pulse oximeter shines
 red (660 nm) and infrared (940 nm) light through the finger; the two forms absorb them differently. It divides the
 pulsing part of each signal (AC, arterial blood) by the steady part (DC, tissue) and takes the ratio
 
-$$R = \frac{AC_{\mathrm{red}} / DC_{\mathrm{red}}}{AC_{\mathrm{IR}} / DC_{\mathrm{IR}}}, \qquad \mathrm{SpO_2} \approx a - b\,R$$
+```math
+R = \frac{AC_{\mathrm{red}} / DC_{\mathrm{red}}}{AC_{\mathrm{IR}} / DC_{\mathrm{IR}}}, \qquad \mathrm{SpO_2} \approx a - b\,R
+```
 
 where $a$ and $b$ come from the manufacturer's calibration (a common textbook form is $110 - 25R$). The device does
 this; the EDF channel `SAT` already holds SpO2 in %, in 1 % steps.
@@ -246,13 +250,19 @@ this; the EDF channel `SAT` already holds SpO2 in %, in 1 % steps.
 **How a desaturation is found.** Let $x_i$ be the raw `SAT` samples (256 Hz) and $n$ count seconds.
 
 1. *One value per second*, with probe-off dropouts (the sensor writes 0.5) removed; gaps up to 10 s are filled by linear interpolation:
-   $$s_n = \mathrm{median}\lbrace x_i : i \in \text{second } n\rbrace, \qquad s_n := \text{missing if } s_n \notin [50, 100]$$
+   ```math
+   s_n = \mathrm{median}\lbrace x_i : i \in \text{second } n\rbrace, \qquad s_n := \text{missing if } s_n \notin [50, 100]
+   ```
 2. *Remove 1 % flicker* with a 3-second median: $\tilde s_n = \mathrm{median}(s_{n-1}, s_n, s_{n+1})$.
 3. *Reference level* - the best saturation of the last $L = 60$ s, and the *drop* below it:
-   $$b_n = \max_{n-L < k \le n} \tilde s_k, \qquad d_n = b_n - \tilde s_n$$
+   ```math
+   b_n = \max_{n-L < k \le n} \tilde s_k, \qquad d_n = b_n - \tilde s_n
+   ```
 4. *Desaturation* - every unbroken stretch of seconds $[a, e)$ with $d_n \ge 3$ % lasting $e - a \ge 3$ s. Its *nadir*
    (lowest point) and *depth* are
-   $$\tau = \arg\min_{a \le n < e} \tilde s_n, \qquad \text{depth} = \max_{a \le n < e} d_n$$
+   ```math
+   \tau = \arg\min_{a \le n < e} \tilde s_n, \qquad \text{depth} = \max_{a \le n < e} d_n
+   ```
 
 Example: SpO2 has been 95 % for a minute, then reads 92, 91, 91, 92 %. The drops are 3, 4, 4, 3 %, so this is one
 desaturation of depth 4 % with its nadir at the first 91 % second.
@@ -262,24 +272,34 @@ $j$ has nadir $\tau_j$. Blood takes time to travel from the lungs to the finger,
 $\lambda = 45$ s after the event ends (the measured delay has a median of 18-19 s on both nights, 10th-90th
 percentile -6 to 56 s).
 
-$$c_i = \mathbb{1}\left[\exists j : t^s_i \le \tau_j \le t^e_i + \lambda\right] \qquad \text{(event } i \text{ is confirmed)}$$
-$$x_j = \mathbb{1}\left[\exists i : t^s_i \le \tau_j \le t^e_i + \lambda\right] \qquad \text{(desaturation } j \text{ is explained)}$$
+```math
+c_i = \mathbb{1}\left[\exists j : t^s_i \le \tau_j \le t^e_i + \lambda\right] \qquad \text{(event } i \text{ is confirmed)}
+```
+```math
+x_j = \mathbb{1}\left[\exists i : t^s_i \le \tau_j \le t^e_i + \lambda\right] \qquad \text{(desaturation } j \text{ is explained)}
+```
 
 For a detector with $N$ events and $M$ desaturations, both counted in sleep only:
 
-$$\text{confirmed } P = \frac{1}{N}\sum_i c_i, \qquad \text{explained } R = \frac{1}{M}\sum_j x_j, \qquad F_1 = \frac{2PR}{P + R}$$
+```math
+\text{confirmed } P = \frac{1}{N}\sum_i c_i, \qquad \text{explained } R = \frac{1}{M}\sum_j x_j, \qquad F_1 = \frac{2PR}{P + R}
+```
 
 A detector that flags many or long events would confirm many by luck, so the same $P$ is recomputed with the
 desaturations moved to random times. Each nadir is shifted by the same offset $\delta_k$ and wrapped around the
 recording of length $T$ (this keeps their spacing):
 
-$$P_{\text{chance}} = \frac{1}{K}\sum_{k=1}^{K} P\left(\{(\tau_j + \delta_k) \bmod T\}\right), \quad \delta_k \sim \mathcal{U}[600, T - 600]\ \text{s},\ K = 200, \qquad \text{lift} = \frac{P}{P_{\text{chance}}}$$
+```math
+P_{\text{chance}} = \frac{1}{K}\sum_{k=1}^{K} P\left(\{(\tau_j + \delta_k) \bmod T\}\right), \quad \delta_k \sim \mathcal{U}[600, T - 600]\ \text{s},\ K = 200, \qquad \text{lift} = \frac{P}{P_{\text{chance}}}
+```
 
 Night-level numbers, with $H$ the hours of sleep from the hypnogram:
 
-$$\mathrm{ODI} = \frac{\#\,\text{desaturations in sleep}}{H}, \qquad \mathrm{AHI}_{3\%} = \frac{\#\,\text{apneas} + \#\,\text{confirmed hypopneas}}{H}$$
+```math
+\mathrm{ODI} = \frac{\#\,\text{desaturations in sleep}}{H}, \qquad \mathrm{AHI}_{3\%} = \frac{\#\,\text{apneas} + \#\,\text{confirmed hypopneas}}{H}
+```
 
-$\mathrm{AHI}_{3\%}$ follows the AASM 1A hypopnea rule (>= 30 % flow drop with a >= 3 % desaturation). Arousals,
+$`\mathrm{AHI}_{3\%}`$ follows the AASM 1A hypopnea rule (>= 30 % flow drop with a >= 3 % desaturation). Arousals,
 the rule's other route, are not checked, so it is a lower bound.
 
 Ten minutes of night 2: each flow reduction (shaded, solid = confirmed) is followed about 20 s later by an SpO2
@@ -298,11 +318,15 @@ breath inside a hypopnea does not split the event.
 median the rules use), the flow ratio is averaged over about one breath (5 s) and log-transformed, because ratios
 are multiplicative:
 
-$$r_t = \frac{E_t}{B_t}, \qquad y_t = \log\max\left(\tfrac{1}{5}\textstyle\sum_{k=-2}^{2} r_{t+k},\ 0.02\right)$$
+```math
+r_t = \frac{E_t}{B_t}, \qquad y_t = \log\max\left(\tfrac{1}{5}\textstyle\sum_{k=-2}^{2} r_{t+k},\ 0.02\right)
+```
 
-**Model.** A hidden state $z_t \in \{1, \dots, K\}$ ($K = 3$) follows a Markov chain, and each state emits a Gaussian:
+**Model.** A hidden state $`z_t \in \{1, \dots, K\}`$ ($K = 3$) follows a Markov chain, and each state emits a Gaussian:
 
-$$P(z_t = k \mid z_{t-1} = j) = A_{jk}, \qquad y_t \mid z_t = k \sim \mathcal{N}(\mu_k, \sigma_k^2)$$
+```math
+P(z_t = k \mid z_{t-1} = j) = A_{jk}, \qquad y_t \mid z_t = k \sim \mathcal{N}(\mu_k, \sigma_k^2)
+```
 
 $A_{kk}$ is the chance of staying in state $k$ for another second, so a state lasts $1 / (1 - A_{kk})$ seconds on average.
 
@@ -310,7 +334,9 @@ $A_{kk}$ is the chance of staying in state $k$ for another second, so a state la
 
 * *E-step* - a forward and a backward pass give, for every second, how likely each state is given the whole night, $\gamma_t(k) = P(z_t = k \mid y_{1:T})$, and how likely each transition is, $\xi_t(j, k) = P(z_{t-1} = j, z_t = k \mid y_{1:T})$.
 * *M-step* - re-estimate the parameters as weighted averages:
-  $$\mu_k = \frac{\sum_t \gamma_t(k)\, y_t}{\sum_t \gamma_t(k)}, \qquad \sigma_k^2 = \frac{\sum_t \gamma_t(k)\,(y_t - \mu_k)^2}{\sum_t \gamma_t(k)}, \qquad A_{jk} = \frac{\sum_t \xi_t(j, k)}{\sum_t \sum_{k'} \xi_t(j, k')}$$
+  ```math
+  \mu_k = \frac{\sum_t \gamma_t(k)\, y_t}{\sum_t \gamma_t(k)}, \qquad \sigma_k^2 = \frac{\sum_t \gamma_t(k)\,(y_t - \mu_k)^2}{\sum_t \gamma_t(k)}, \qquad A_{jk} = \frac{\sum_t \xi_t(j, k)}{\sum_t \sum_{k'} \xi_t(j, k')}
+  ```
 
 **Decode (Viterbi, both nights).** The single most likely state sequence, $\hat z_{1:T} = \arg\max_{z_{1:T}} P(z_{1:T} \mid y_{1:T})$.
 
