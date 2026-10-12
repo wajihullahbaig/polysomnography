@@ -246,8 +246,8 @@ this; the EDF channel `SAT` already holds SpO2 in %, in 1 % steps.
 **How a desaturation is found.** Let $x_i$ be the raw `SAT` samples (256 Hz) and $n$ count seconds.
 
 1. *One value per second*, with probe-off dropouts (the sensor writes 0.5) removed; gaps up to 10 s are filled by linear interpolation:
-   $$s_n = \operatorname{median}\{x_i : i \in \text{second } n\}, \qquad s_n := \text{missing if } s_n \notin [50, 100]$$
-2. *Remove 1 % flicker* with a 3-second median: $\tilde s_n = \operatorname{median}(s_{n-1}, s_n, s_{n+1})$.
+   $$s_n = \mathrm{median}\lbrace x_i : i \in \text{second } n\rbrace, \qquad s_n := \text{missing if } s_n \notin [50, 100]$$
+2. *Remove 1 % flicker* with a 3-second median: $\tilde s_n = \mathrm{median}(s_{n-1}, s_n, s_{n+1})$.
 3. *Reference level* - the best saturation of the last $L = 60$ s, and the *drop* below it:
    $$b_n = \max_{n-L < k \le n} \tilde s_k, \qquad d_n = b_n - \tilde s_n$$
 4. *Desaturation* - every unbroken stretch of seconds $[a, e)$ with $d_n \ge 3$ % lasting $e - a \ge 3$ s. Its *nadir*
