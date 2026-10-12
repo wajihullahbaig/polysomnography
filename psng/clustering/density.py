@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
-from scipy.spatial import KDTree
 from scipy.spatial.distance import cdist
 from sklearn.cluster import DBSCAN
 from sklearn.ensemble import IsolationForest
 
-from psng.clustering.base import Clusterer, cluster_means, nearest_center
+from psng.clustering.base import Clusterer, cluster_means
 
 
 class DBSCANClusterer(Clusterer):
@@ -32,40 +31,6 @@ class DBSCANClusterer(Clusterer):
         labels = self.model.labels_[self.model.core_sample_indices_][nearest]
         return np.where(distances[np.arange(len(X)), nearest] <= self.model.eps, labels, -1)
 
-
-class KDTreeClusterer(Clusterer):
-    """Radius-based density clustering over a KD-tree; unseen points go to the nearest cluster mean."""
-
-    def __init__(self, radius: float = 0.5, min_cluster_size: int = 5, leaf_size: int = 10):
-        super().__init__()
-        self.radius = radius
-        self.min_cluster_size = min_cluster_size
-        self.leaf_size = leaf_size
-
-    def fit(self, X):
-        neighbors = KDTree(X, leafsize=self.leaf_size).query_ball_point(X, self.radius)
-        labels = np.full(len(X), -1)
-        cluster = 0
-        for seed in range(len(X)):
-            if labels[seed] != -1 or len(neighbors[seed]) < self.min_cluster_size:
-                continue
-            labels[seed] = cluster
-            queue = [seed]
-            while queue:
-                point = queue.pop()
-                if len(neighbors[point]) < self.min_cluster_size:
-                    continue  # border point: belongs to the cluster but does not expand it
-                for other in neighbors[point]:
-                    if labels[other] == -1:
-                        labels[other] = cluster
-                        queue.append(other)
-            cluster += 1
-        self.labels_ = labels
-        self.centers_ = cluster_means(X, labels)
-        return self
-
-    def predict(self, X):
-        return nearest_center(X, self.centers_)
 
 
 class IsolationForestClusterer(Clusterer):

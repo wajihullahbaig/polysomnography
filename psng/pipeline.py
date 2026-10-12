@@ -2,12 +2,15 @@
 
 Training:   EDF -> windows -> features (cached per chunk) -> fit transformer -> fit models -> outputs
 Validation: EDF -> windows -> features (cached per chunk) -> load transformer -> load models -> outputs
+
+Both stages also run the rule-based airflow event detector on the recording and, when a hypnogram
+is configured, read the sleep stages; these label every window and score the clusters.
 """
 
 from __future__ import annotations
 
-import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -17,15 +20,15 @@ from joblib import Parallel, delayed
 from psng.clustering import Clusterer, make_clusterer
 from psng.data import META_COLUMNS, ClusterMetrics, SignalData, feature_matrix
 from psng.edf import load_channel
+from psng.events import (baseline_variants, cluster_profile, detect_events, event_summary, flow_envelope, load_hypnogram, name_clusters,
+                         recording_baseline, window_event_labels, window_stages)
 from psng.features import FeatureExtractor, make_extractor
 from psng.log import get_logger
 from psng.metrics import evaluate, format_table, write_metrics
-from psng.plots import save_interactive, save_scatter
+from psng.plots import save_events_overview, save_interactive, save_scatter, save_timeline
 from psng.settings import Settings, Stage
 from psng.transform import FeatureTransformer
 from psng.windows import WindowPreprocessor, window_starts
-
-os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 1))  # loky cannot count physical cores on Windows
 
 
 def window_features(window: np.ndarray, preprocess: WindowPreprocessor, extractor: FeatureExtractor) -> dict[str, float]:
@@ -36,11 +39,35 @@ class Paths:
     def __init__(self, output_dir: Path, stage: Stage):
         self.models = output_dir / "training" / "models"  # models are always read from training
         self.cache = output_dir / "cache"
-        self.csvs = output_dir / stage / "csvs"
-        self.plots = output_dir / stage / "plots"
-        self.metrics = output_dir / stage / "metrics.json"
+        self.stage_dir = output_dir / stage
+        self.csvs = self.stage_dir / "csvs"
+        self.plots = self.stage_dir / "plots"
+        self.metrics = self.stage_dir / "metrics.json"
+        self.events = self.stage_dir / "events.csv"
+        self.event_summary = self.stage_dir / "events.json"
         for folder in (self.models, self.cache, self.csvs, self.plots):
             folder.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass
+class Prepared:
+    """Everything a stage computes before any clusterer runs."""
+
+    signal: SignalData
+    envelope: pd.DataFrame
+    baseline: float
+    events: pd.DataFrame
+    hypnogram: pd.DataFrame | None
+    frame: pd.DataFrame  # window times, raw features, `event` and (optionally) `stage` labels
+    X: pd.DataFrame  # transformed features the clusterers see
+
+    @property
+    def event_labels(self) -> np.ndarray:
+        return self.frame["event"].to_numpy(object)
+
+    @property
+    def stages(self) -> np.ndarray | None:
+        return self.frame["stage"].to_numpy(object) if "stage" in self.frame.columns else None
 
 
 class Pipeline:
@@ -52,29 +79,53 @@ class Pipeline:
         self.log = get_logger(f"psng.{stage}", settings.run.log_dir / f"{stage}.log", settings.run.log_level)
 
     def run(self) -> list[ClusterMetrics]:
-        segment = self.settings.segment(self.stage)
-        self.log.info("stage=%s file=%s channel=%s segment=%s-%ss resume=%s",
-                      self.stage, segment.file_path, self.settings.data.channel, segment.start_seconds, segment.end_seconds, self.resume)
-        signal = load_channel(segment.file_path, self.settings.data.channel, segment.start_seconds, segment.end_seconds)
-        self.log.info("loaded %.1f s at %g Hz", signal.duration, signal.sfreq)
-
-        frame = self.extract_features(signal)
-        features = feature_matrix(frame)
-        transformer = self.transformer(features)
-        X = transformer.transform(features)
-        self.log.info("clustering %d windows x %d columns %s", *X.shape, list(X.columns))
-
-        metrics = [self.cluster(name, params, X, frame, signal) for name, params in self.settings.models.items()]
+        prepared = self.prepare()
+        metrics = [self.cluster(name, params, prepared) for name, params in self.settings.models.items()]
         write_metrics(metrics, self.paths.metrics)
         self.log.info("metrics written to %s\n%s", self.paths.metrics, format_table(metrics))
         return metrics
+
+    def prepare(self) -> Prepared:
+        segment = self.settings.segment(self.stage)
+        cfg = self.settings.data
+        self.log.info("stage=%s file=%s channel=%s segment=%s-%ss resume=%s",
+                      self.stage, segment.file_path, cfg.channel, segment.start_seconds, segment.end_seconds, self.resume)
+        signal = load_channel(segment.file_path, cfg.channel, segment.start_seconds, segment.end_seconds)
+        self.log.info("loaded %.1f s at %g Hz", signal.duration, signal.sfreq)
+
+        envelope = flow_envelope(signal, cfg.smoothing_seconds)
+        baseline = recording_baseline(envelope)
+        events = detect_events(envelope, self.settings.events)
+        events.to_csv(self.paths.events, index=False)
+        hypnogram = load_hypnogram(segment.hypnogram_path) if segment.hypnogram_path else None
+
+        frame = self.extract_features(signal, baseline if cfg.normalisation == "recording" else None)
+        starts, ends = frame[META_COLUMNS[0]].to_numpy(float), frame[META_COLUMNS[1]].to_numpy(float)
+        frame["event"] = window_event_labels(starts, ends, events, self.settings.events.min_overlap_seconds)
+        if hypnogram is not None:
+            frame["stage"] = window_stages(starts, ends, hypnogram)
+        summary = event_summary(self.stage, events, frame["event"].to_numpy(object), None, signal.duration, baseline, hypnogram)
+        self.paths.event_summary.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+        self.log.info("events: apnea=%d hypopnea=%d artefact=%d events/hour=%.1f ahi=%s event windows=%.1f%% (baseline amplitude %.3g)",
+                      summary.apnea, summary.hypopnea, summary.artefact, summary.events_per_hour,
+                      None if summary.ahi is None else f"{summary.ahi:.1f}", 100 * summary.event_window_fraction, baseline)
+        save_events_overview(envelope, events, hypnogram, baseline, f"{cfg.channel} airflow events ({self.stage})", self.paths.plots / "events.png",
+                             baselines=baseline_variants(envelope["envelope"].to_numpy(float), self.settings.events))
+
+        features = feature_matrix(frame)
+        X = self.transformer(features).transform(features)
+        self.log.info("clustering %d windows x %d columns %s", *X.shape, list(X.columns))
+        return Prepared(signal, envelope, baseline, events, hypnogram, frame, X)
 
     # ----------------------------------------------------------------- features
     def cache_path(self) -> Path:
         return self.paths.cache / f"features_{self.stage}_{self.settings.feature_key(self.stage)}.csv"
 
-    def extract_features(self, signal: SignalData) -> pd.DataFrame:
-        """Window features, appended to a CSV cache in chunks so an interrupted run resumes."""
+    def extract_features(self, signal: SignalData, scale: float | None = None) -> pd.DataFrame:
+        """Window features, appended to a CSV cache in chunks so an interrupted run resumes.
+
+        `scale` is the recording baseline amplitude for `normalisation: recording`; None scales each window by its own std.
+        """
         cfg = self.settings.data
         window = int(round(cfg.window_seconds * signal.sfreq))
         starts = window_starts(len(signal.signal), window, int(round(cfg.hop_seconds * signal.sfreq)))
@@ -86,8 +137,10 @@ class Pipeline:
             self.log.info("resuming feature extraction: %d/%d windows cached in %s", done, len(starts), cache.name)
 
         if done < len(starts):
-            preprocess = WindowPreprocessor(signal.sfreq, cfg.smoothing_seconds)
+            preprocess = WindowPreprocessor(signal.sfreq, cfg.smoothing_seconds, scale=scale)
             extractor = make_extractor(self.settings.features.extractor, signal.sfreq)
+            self.log.info("extracting %s features for %d windows (%s scaling%s)", self.settings.features.extractor, len(starts) - done,
+                          cfg.normalisation, "" if scale is None else f", baseline {scale:.3g}")
             t0 = time.perf_counter()
             with Parallel(n_jobs=self.settings.run.n_jobs) as parallel:
                 for i in range(done, len(starts), self.settings.run.chunk_windows):
@@ -126,24 +179,44 @@ class Pipeline:
         return transformer
 
     # ----------------------------------------------------------------- clusters
-    def cluster(self, name: str, params: dict, X: pd.DataFrame, frame: pd.DataFrame, signal: SignalData) -> ClusterMetrics:
+    def cluster(self, name: str, params: dict, prepared: Prepared) -> ClusterMetrics:
         path = self.paths.models / f"{name}.pkl"
-        values = X.to_numpy(float)
+        values = prepared.X.to_numpy(float)
         model, fit_seconds, resumed = self._model(name, params, values, path)
         labels = model.predict(values)
-        metrics = evaluate(values, labels, algorithm=name, stage=self.stage, fit_seconds=fit_seconds, resumed=resumed)
+        metrics = evaluate(values, labels, algorithm=name, stage=self.stage, fit_seconds=fit_seconds, resumed=resumed,
+                           event_labels=prepared.event_labels, stages=prepared.stages)
 
-        out = frame.copy()
+        profile = cluster_profile(labels, prepared.event_labels, prepared.stages, feature_matrix(prepared.frame))
+        names = self._names(model, profile, path)
+        profile.insert(1, "name", profile["cluster_id"].map(names))
+        metrics.cluster_names = {str(k): v for k, v in names.items()}
+
+        out = prepared.frame.copy()
         out["cluster_id"] = labels
-        out["cluster_label"] = "cluster_label " + out["cluster_id"].astype(str)
+        out["cluster_label"] = out["cluster_id"].map(names)
         out.to_csv(self.paths.csvs / f"{name}.csv", index=False)
-        title = f"{name} on {signal.channel} ({self.stage})"
-        save_scatter(values, labels, model.centers_, title, self.paths.plots / f"{name}.png")
+        profile.to_csv(self.paths.csvs / f"{name}_clusters.csv", index=False)
+        title = f"{name} on {prepared.signal.channel} ({self.stage})"
+        save_scatter(values, labels, model.centers_, title, self.paths.plots / f"{name}.png", names)
+        save_timeline(out, prepared.events, f"{title}: cluster per window, events shaded", self.paths.plots / f"{name}_timeline.png", names)
         if self.settings.run.interactive_plots:
-            save_interactive(signal, out, title, self.paths.plots / f"{name}.html", self.settings.run.plot_max_points)
-        self.log.info("%s: clusters=%d noise=%d silhouette=%s quality=%s", name, metrics.n_clusters, metrics.n_noise,
-                      None if metrics.silhouette is None else f"{metrics.silhouette:.3f}", metrics.quality)
+            save_interactive(prepared.signal, out, title, self.paths.plots / f"{name}.html", self.settings.run.plot_max_points,
+                             events=prepared.events, hypnogram=prepared.hypnogram, names=names)
+        self.log.info("%s: clusters=%d noise=%d silhouette=%s quality=%s event_f1=%s event_clusters=%s names=%s", name, metrics.n_clusters,
+                      metrics.n_noise, _fmt(metrics.silhouette), metrics.quality, _fmt(metrics.event_f1), metrics.event_clusters, names)
         return metrics
+
+    def _names(self, model: Clusterer, profile: pd.DataFrame, path: Path) -> dict[int, str]:
+        """Cluster names are decided on training data and stored with the model so validation reuses them."""
+        names = dict(getattr(model, "names_", {}) or {})
+        if self.stage == "training" and not names:
+            names = name_clusters(profile)
+            model.names_ = names
+            model.save(path)
+        for k in profile["cluster_id"].astype(int):
+            names.setdefault(k, "noise" if k < 0 else f"cluster {k}")  # labels unseen in training (e.g. noise at validation)
+        return names
 
     def _model(self, name: str, params: dict, X: np.ndarray, path: Path) -> tuple[Clusterer, float, bool]:
         if path.exists():
@@ -159,6 +232,10 @@ class Pipeline:
         model = make_clusterer(name, params).fit(X)
         model.save(path)
         return model, time.perf_counter() - t0, False
+
+
+def _fmt(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.3f}"
 
 
 def _valid_cached_rows(path: Path, expected_starts: np.ndarray) -> int:

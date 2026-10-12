@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import find_peaks
 
-from psng.features.base import FeatureExtractor, spectral_entropy
+from psng.features.base import FeatureExtractor, breath_cycles, hjorth_complexity, spectral_entropy
 
 
 class FreqTimePattern(FeatureExtractor):
@@ -15,11 +15,9 @@ class FreqTimePattern(FeatureExtractor):
         self.min_breath_seconds = min_breath_seconds
 
     def extract(self, window: np.ndarray) -> dict[str, float]:
-        d1 = np.diff(window)
-        v0, v1, v2 = window.var(), d1.var(), np.diff(d1).var()
-        rate, regularity = self._breath_cycles(window)
+        rate, regularity = breath_cycles(window, self.sfreq, self.relative_peak_height, self.min_breath_seconds)
         return {
-            "complexity": float(np.sqrt(v2 * v0) / v1) if v1 > 0 else 0.0,
+            "complexity": hjorth_complexity(window),
             "peaks": self._relative_peak_count(window),
             "spectral_entropy": spectral_entropy(window),
             "breathing_rate": rate,
@@ -32,16 +30,3 @@ class FreqTimePattern(FeatureExtractor):
             return 0
         heights = window[peaks]
         return int((heights >= heights.max() * self.relative_peak_height).sum())
-
-    def _breath_cycles(self, window: np.ndarray) -> tuple[float, float]:
-        """Breaths per minute and coefficient of variation of breath intervals."""
-        peaks, _ = find_peaks(
-            window,
-            distance=int(self.sfreq * self.min_breath_seconds),
-            height=window.max() * self.relative_peak_height,
-            prominence=0.5 * window.std(),
-        )
-        if len(peaks) < 2:
-            return 0.0, 0.0
-        intervals = np.diff(peaks) / self.sfreq
-        return float(60.0 / intervals.mean()), float(intervals.std() / intervals.mean())

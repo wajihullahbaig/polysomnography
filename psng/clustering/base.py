@@ -8,7 +8,6 @@ from typing import Any
 
 import joblib
 import numpy as np
-from scipy.spatial.distance import cdist
 
 
 class Clusterer(ABC):
@@ -18,6 +17,7 @@ class Clusterer(ABC):
         self.params: dict[str, Any] = {}
         self.labels_: np.ndarray | None = None
         self.centers_: np.ndarray | None = None
+        self.names_: dict[int, str] = {}  # descriptive cluster names assigned after training
 
     @abstractmethod
     def fit(self, X: np.ndarray) -> Clusterer: ...
@@ -37,8 +37,3 @@ def cluster_means(X: np.ndarray, labels: np.ndarray) -> np.ndarray | None:
     ids = np.unique(labels[labels >= 0])
     return np.vstack([X[labels == k].mean(axis=0) for k in ids]) if len(ids) else None
 
-
-def nearest_center(X: np.ndarray, centers: np.ndarray | None) -> np.ndarray:
-    if centers is None or len(centers) == 0:
-        return np.full(len(X), -1)
-    return cdist(X, centers).argmin(axis=1)

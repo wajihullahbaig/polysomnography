@@ -3,7 +3,7 @@
 from typing import Any
 
 from psng.clustering.base import Clusterer
-from psng.clustering.density import DBSCANClusterer, IsolationForestClusterer, KDTreeClusterer
+from psng.clustering.density import DBSCANClusterer, IsolationForestClusterer
 from psng.clustering.sklearn_models import BisectingKMeansClusterer, GMMClusterer, KMeansClusterer, MiniBatchKMeansClusterer
 
 CLUSTERERS: dict[str, type[Clusterer]] = {
@@ -12,7 +12,6 @@ CLUSTERERS: dict[str, type[Clusterer]] = {
     "bisecting": BisectingKMeansClusterer,
     "gmm": GMMClusterer,
     "dbscan": DBSCANClusterer,
-    "kdtree": KDTreeClusterer,
     "isolation": IsolationForestClusterer,
 }
 

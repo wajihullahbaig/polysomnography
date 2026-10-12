@@ -1,0 +1,77 @@
+{
+  // Debug configurations for the PSNG pipeline. Select the PSNG conda interpreter
+  // (Python: Select Interpreter) or set "python" below, then press F5.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "PSNG: all (train + validate + report)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "psng",
+      "args": ["all", "--settings", "configs/settings.yaml", "--docs", "docs"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "PSNG: train",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "psng",
+      "args": ["train", "--settings", "configs/settings.yaml"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "PSNG: train (no resume)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "psng",
+      "args": ["train", "--settings", "configs/settings.yaml", "--no-resume"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "PSNG: validate",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "psng",
+      "args": ["validate", "--settings", "configs/settings.yaml"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "PSNG: report (figures into docs/)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "psng",
+      "args": ["report", "--settings", "configs/settings.yaml", "--docs", "docs"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "PSNG: sweep number of clusters (kmeans 2-12)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "psng",
+      "args": ["sweep", "--settings", "configs/settings.yaml", "--model", "kmeans", "--k-min", "2", "--k-max", "12"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "PSNG: pytest",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

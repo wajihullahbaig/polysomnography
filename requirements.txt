@@ -10,3 +10,4 @@ PyYAML==6.0.2
 pydantic==2.12.5
 PyWavelets==1.8.0
 pytest>=8.0
+xgboost>=2.0

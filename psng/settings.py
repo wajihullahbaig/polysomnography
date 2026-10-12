@@ -17,6 +17,7 @@ class Segment(BaseModel):
     file_path: Path
     start_seconds: float = Field(0.0, ge=0)
     end_seconds: float | None = Field(None, gt=0)  # None = until the end of the recording
+    hypnogram_path: Path | None = None  # optional sleep stages (30 s epochs) used as an external reference
 
 
 class DataSettings(BaseModel):
@@ -24,6 +25,7 @@ class DataSettings(BaseModel):
     window_seconds: float = Field(gt=0)
     hop_seconds: float = Field(0.0, ge=0)  # 0 = non-overlapping windows
     smoothing_seconds: float = Field(0.5, ge=0)
+    normalisation: Literal["window", "recording"] = "recording"  # scale each window by its own std, or by the recording baseline
     training: Segment
     validation: Segment
 
@@ -37,8 +39,11 @@ class SelectionSettings(BaseModel):
 
 
 class ReductionSettings(BaseModel):
-    type: Literal["none", "pca"] = "none"
+    type: Literal["none", "pca", "autoencoder"] = "none"
     n_components: int = Field(3, ge=1)
+    hidden: int = Field(16, ge=1)  # autoencoder: units in the two hidden layers around the bottleneck
+    activation: Literal["tanh", "relu", "logistic", "identity"] = "tanh"  # autoencoder
+    max_iter: int = Field(2000, ge=1)  # autoencoder training epochs
 
 
 class FeatureSettings(BaseModel):
@@ -57,6 +62,19 @@ class FeatureSettings(BaseModel):
         return name
 
 
+class EventSettings(BaseModel):
+    """Rule-based airflow event detection on the 1 Hz envelope (flow relative to a rolling baseline)."""
+
+    apnea_ratio: float = Field(0.1, gt=0, lt=1)  # flow below this fraction of baseline = apnea (AASM: >= 90 % drop)
+    hypopnea_ratio: float = Field(0.7, gt=0, lt=1)  # flow below this fraction of baseline = hypopnea (AASM: >= 30 % drop)
+    min_seconds: float = Field(10.0, gt=0)  # minimum event duration
+    max_seconds: float = Field(120.0, gt=0)  # longer low-flow stretches are artefacts (sensor off, disconnection)
+    baseline: Literal["rolling_median", "kalman"] = "rolling_median"  # how the local breathing amplitude is tracked
+    baseline_seconds: float = Field(600.0, gt=0)  # rolling_median: window of the centred median
+    kalman_process_ratio: float = Field(1e-5, gt=0)  # kalman: process / measurement noise variance (smaller = slower level)
+    min_overlap_seconds: float = Field(5.0, ge=0)  # a window is labelled with an event it overlaps at least this long
+
+
 class RunSettings(BaseModel):
     output_dir: Path = Path("outputs")
     log_dir: Path = Path("logs")
@@ -72,6 +90,7 @@ class Settings(BaseModel):
     data: DataSettings
     features: FeatureSettings
     models: dict[str, dict[str, Any]] = Field(min_length=1)
+    events: EventSettings = Field(default_factory=EventSettings)
     run: RunSettings = Field(default_factory=RunSettings)
 
     @field_validator("models", mode="before")
@@ -95,7 +114,7 @@ class Settings(BaseModel):
     def feature_key(self, stage: Stage) -> str:
         """Hash of everything that determines the extracted features of a stage."""
         payload = {
-            "segment": self.segment(stage).model_dump(mode="json"),
+            "segment": self.segment(stage).model_dump(mode="json", exclude={"hypnogram_path"}),
             "data": self.data.model_dump(mode="json", exclude={"training", "validation"}),
             "extractor": self.features.extractor,
         }

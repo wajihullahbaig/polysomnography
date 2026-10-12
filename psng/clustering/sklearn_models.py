@@ -26,13 +26,13 @@ class SklearnClusterer(Clusterer):
 
 
 class KMeansClusterer(SklearnClusterer):
-    def __init__(self, n_clusters: int = 8, random_state: int = 42):
-        super().__init__(KMeans(n_clusters=n_clusters, n_init="auto", random_state=random_state))
+    def __init__(self, n_clusters: int = 8, n_init: int = 10, random_state: int = 42):
+        super().__init__(KMeans(n_clusters=n_clusters, n_init=n_init, random_state=random_state))
 
 
 class MiniBatchKMeansClusterer(SklearnClusterer):
-    def __init__(self, n_clusters: int = 8, batch_size: int = 256, max_iter: int = 100, random_state: int = 42):
-        super().__init__(MiniBatchKMeans(n_clusters=n_clusters, batch_size=batch_size, max_iter=max_iter, n_init="auto", random_state=random_state))
+    def __init__(self, n_clusters: int = 8, batch_size: int = 256, max_iter: int = 100, n_init: int = 10, random_state: int = 42):
+        super().__init__(MiniBatchKMeans(n_clusters=n_clusters, batch_size=batch_size, max_iter=max_iter, n_init=n_init, random_state=random_state))
 
 
 class BisectingKMeansClusterer(SklearnClusterer):
@@ -41,5 +41,6 @@ class BisectingKMeansClusterer(SklearnClusterer):
 
 
 class GMMClusterer(SklearnClusterer):
-    def __init__(self, n_components: int = 8, covariance_type: str = "full", max_iter: int = 100, reg_covar: float = 1e-6, random_state: int = 42):
-        super().__init__(GaussianMixture(n_components=n_components, covariance_type=covariance_type, max_iter=max_iter, reg_covar=reg_covar, random_state=random_state))
+    def __init__(self, n_components: int = 8, covariance_type: str = "full", max_iter: int = 100, n_init: int = 3, reg_covar: float = 1e-6, random_state: int = 42):
+        super().__init__(GaussianMixture(n_components=n_components, covariance_type=covariance_type, max_iter=max_iter, n_init=n_init,
+                                         reg_covar=reg_covar, random_state=random_state))
