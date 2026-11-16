@@ -602,3 +602,8 @@ Features, transformer and models are checkpointed; a re-run resumes from the cac
   would replace the geometric stay times.
 * One patient, two nights. The pipeline is per-recording normalised, but cluster names and k were chosen here.
 * An autoencoder on the raw 30 s waveform (instead of on the 12 features) is the natural next deep model.
+
+## Contributors
+
+* **wajih** (`wajihullahbaig@gmail.com`) - author and maintainer
+* **Antigravity** (Google DeepMind) - code review, bug fixes, plot refinements, and documentation updates
