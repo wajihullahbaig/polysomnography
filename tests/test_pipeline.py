@@ -12,7 +12,7 @@ from psng.clustering import CLUSTERERS, make_clusterer
 from psng.data import SignalData, feature_matrix
 from psng.features import EXTRACTORS, make_extractor
 from psng.metrics import evaluate
-from psng.pipeline import Pipeline
+from psng.pipeline import Pipeline, _valid_cached_rows
 from psng.settings import FeatureSettings, Settings
 from psng.transform import FeatureTransformer
 from psng.windows import WindowPreprocessor, window_starts
@@ -136,6 +136,10 @@ def test_settings_reject_unknown_names(tmp_path):
         make_settings(tmp_path, nonsense={})
     with pytest.raises(ValidationError):
         Settings.model_validate({**make_settings(tmp_path).model_dump(), "features": {"extractor": "nope"}})
+    with pytest.raises(ValidationError):
+        Settings.model_validate({**make_settings(tmp_path).model_dump(), "events": {"apnea_ratio": 0.8, "hypopnea_ratio": 0.7}})
+    with pytest.raises(ValidationError):
+        Settings.model_validate({**make_settings(tmp_path).model_dump(), "oximetry": {"valid_range": (100, 50)}})
 
 
 # ------------------------------------------------------------------ pipeline
@@ -185,3 +189,23 @@ def test_feature_cache_resumes_mid_extraction(tmp_path, fake_edf):
     resumed = Pipeline(settings, "training").extract_features(signal)
     pd.testing.assert_frame_equal(resumed, full, check_dtype=False)  # int column re-read as float after rewrite
     assert feature_matrix(resumed).shape[1] == 5
+
+    empty_cache = tmp_path / "empty.csv"
+    empty_cache.write_text("", encoding="utf-8")
+    assert _valid_cached_rows(empty_cache, np.array([0.0, 10.0])) == 0
+    bad_cache = tmp_path / "bad.csv"
+    bad_cache.write_text("window_start_time,window_end_time,x\n0.0,10.0,1.0\nbad,20.0,2.0\n", encoding="utf-8")
+    assert _valid_cached_rows(bad_cache, np.array([0.0, 10.0])) == 1
+
+
+def test_resume_invalidates_when_upstream_features_change(tmp_path, fake_edf):
+    settings = make_settings(tmp_path)
+    assert not any(m.resumed for m in Pipeline(settings, "training").run())
+    changed = settings.model_copy(deep=True)
+    changed.features.extractor = "basic"
+    assert not any(m.resumed for m in Pipeline(changed, "training").run())
+
+
+def test_wavelet_entropy_is_non_negative():
+    feats = make_extractor("wavelet", SFREQ).extract(WindowPreprocessor(SFREQ)(breathing(10)))
+    assert all(v >= 0.0 for k, v in feats.items() if k.startswith("entropy_level_"))

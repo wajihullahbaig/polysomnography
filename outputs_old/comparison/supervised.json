@@ -1,0 +1,25 @@
+{
+  "backend": "xgboost",
+  "target": "event",
+  "n_train": 1130,
+  "n_validation": 1085,
+  "train_f1": 0.9032258064516129,
+  "validation_f1": 0.7306791569086651,
+  "validation_precision": 0.6753246753246753,
+  "validation_recall": 0.7959183673469388,
+  "validation_auc": 0.9365200523403963,
+  "importances": {
+    "longest_low_flow_seconds": 0.35057640075683594,
+    "apnea_fraction": 0.14742203056812286,
+    "envelope_cv": 0.08714081346988678,
+    "envelope_min": 0.06931306421756744,
+    "low_flow_fraction": 0.057864509522914886,
+    "breathing_regularity": 0.053774427622556686,
+    "breathing_rate": 0.04665645211935043,
+    "envelope_max": 0.04655212163925171,
+    "amplitude": 0.03832564130425453,
+    "complexity": 0.035588715225458145,
+    "spectral_entropy": 0.03421224653720856,
+    "dominant_frequency": 0.03257365897297859
+  }
+}

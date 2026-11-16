@@ -21,7 +21,7 @@ class RespiratoryFeatures(FeatureExtractor):
 
     def envelope(self, window: np.ndarray) -> np.ndarray:
         """RMS amplitude per second (same units as the window)."""
-        step = int(self.sfreq)
+        step = max(1, int(self.sfreq))
         n = len(window) // step
         if n < 1:
             return np.array([np.sqrt(np.mean(window**2))])

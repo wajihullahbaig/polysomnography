@@ -22,9 +22,11 @@ try:  # optional dependency
     from xgboost import XGBClassifier
 
     BACKEND = "xgboost"
+    BACKEND_LABEL = "XGBoost"
 except ImportError:  # pragma: no cover - depends on the environment
     XGBClassifier = None
     BACKEND = "sklearn-histgb"
+    BACKEND_LABEL = "Gradient boosting"
 
 NON_FEATURES = ("cluster_id", "cluster_label")
 
@@ -94,5 +96,5 @@ def run_supervised(output_dir: Path, model_csv: str) -> SupervisedResult | None:
     comparison.mkdir(parents=True, exist_ok=True)
     (comparison / "supervised.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
     save_supervised(validation, probability, result.validation_auc, result.validation_f1,
-                    "XGBoost on night 2: how sure the model is that each 30 s window holds an event", comparison / "xgboost.png")
+                    f"{BACKEND_LABEL} on night 2: how sure the model is that each 30 s window holds an event", comparison / "xgboost.png")
     return result

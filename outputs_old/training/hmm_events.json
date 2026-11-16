@@ -1,0 +1,17 @@
+{
+  "stage": "training",
+  "duration_hours": 9.42361111111111,
+  "sleep_hours": 5.141666666666667,
+  "n_windows": 1130,
+  "apnea": 2,
+  "hypopnea": 211,
+  "artefact": 0,
+  "events_per_hour": 22.60280029476787,
+  "ahi": 22.755267423014587,
+  "event_window_fraction": 0.22389380530973452,
+  "baseline_amplitude": 48.72413410499518,
+  "desaturations": 291,
+  "odi": 30.14586709886548,
+  "confirmed_fraction": 0.6752136752136753,
+  "ahi_confirmed": 15.559157212317666
+}

@@ -157,3 +157,17 @@ def test_pipeline_with_events_hypnogram_names_report_and_sweep(tmp_path, monkeyp
     assert (out / "training" / "sweep_kmeans.png").exists()
     with pytest.raises(ValueError):
         sweep(settings, "dbscan", [2])
+
+
+def test_window_stages_and_event_summary_handle_offsets_and_gaps():
+    hypnogram = pd.DataFrame({
+        "end_time": [330.0, 360.0, 420.0, 450.0],  # starts at 300 s, missing [360, 390)
+        "stage": ["W", "N2", "REM", "?"],
+    })
+    stages = window_stages(np.array([0.0, 300.0, 330.0, 360.0, 390.0]), np.array([30.0, 330.0, 360.0, 390.0, 420.0]), hypnogram)
+    assert list(stages) == ["?", "W", "N2", "?", "REM"]
+
+    events = pd.DataFrame({"start_time": [340.0], "end_time": [355.0], "duration": [15.0], "kind": ["hypopnea"], "min_flow": [0.5]})
+    summary = event_summary("training", events, np.array(["hypopnea"]), None, 150.0, 1.0, hypnogram, start_seconds=300.0)
+    assert summary.sleep_hours == pytest.approx(2 * 30 / 3600)  # only N2 and REM, not W or ?
+    assert summary.ahi == pytest.approx(1 / summary.sleep_hours)

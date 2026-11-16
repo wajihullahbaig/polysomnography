@@ -1,0 +1,171 @@
+[
+  {
+    "algorithm": "kmeans",
+    "stage": "validation",
+    "n_windows": 1085,
+    "n_clusters": 5,
+    "n_noise": 0,
+    "silhouette": 0.06571707926626451,
+    "calinski_harabasz": 150.28951835782928,
+    "davies_bouldin": 1.5943089152080905,
+    "quality": "poor",
+    "event_f1": 0.7076923076923078,
+    "event_precision": 0.711340206185567,
+    "event_recall": 0.7040816326530612,
+    "event_nmi": 0.22988800266224246,
+    "event_clusters": [
+      2
+    ],
+    "cluster_names": {
+      "0": "large breaths",
+      "1": "regular breathing",
+      "2": "hypopnea",
+      "3": "regular breathing #2",
+      "4": "irregular rhythm"
+    },
+    "stage_nmi": 0.10426772850864924,
+    "fit_seconds": 0.0,
+    "resumed": true
+  },
+  {
+    "algorithm": "minibatch",
+    "stage": "validation",
+    "n_windows": 1085,
+    "n_clusters": 5,
+    "n_noise": 0,
+    "silhouette": 0.06753099577768788,
+    "calinski_harabasz": 132.29868405110113,
+    "davies_bouldin": 1.718085678633397,
+    "quality": "poor",
+    "event_f1": 0.6307277628032345,
+    "event_precision": 0.6685714285714286,
+    "event_recall": 0.5969387755102041,
+    "event_nmi": 0.21415220184318484,
+    "event_clusters": [
+      0
+    ],
+    "cluster_names": {
+      "0": "slow breathing, irregular rhythm with events",
+      "1": "regular breathing",
+      "2": "large breaths",
+      "3": "regular breathing #2",
+      "4": "regular breathing with events"
+    },
+    "stage_nmi": 0.10125220078321227,
+    "fit_seconds": 0.0,
+    "resumed": true
+  },
+  {
+    "algorithm": "bisecting",
+    "stage": "validation",
+    "n_windows": 1085,
+    "n_clusters": 5,
+    "n_noise": 0,
+    "silhouette": 0.13275102756614654,
+    "calinski_harabasz": 190.5426535602841,
+    "davies_bouldin": 1.6029754796801936,
+    "quality": "poor",
+    "event_f1": 0.6742857142857143,
+    "event_precision": 0.7662337662337663,
+    "event_recall": 0.6020408163265306,
+    "event_nmi": 0.23436423621714697,
+    "event_clusters": [
+      4
+    ],
+    "cluster_names": {
+      "0": "large breaths, mostly W",
+      "1": "regular breathing",
+      "2": "regular breathing #2",
+      "3": "irregular rhythm with events",
+      "4": "hypopnea"
+    },
+    "stage_nmi": 0.09153736754733012,
+    "fit_seconds": 0.0,
+    "resumed": true
+  },
+  {
+    "algorithm": "gmm",
+    "stage": "validation",
+    "n_windows": 1085,
+    "n_clusters": 5,
+    "n_noise": 0,
+    "silhouette": -0.015309260953090953,
+    "calinski_harabasz": 135.80962630904023,
+    "davies_bouldin": 1.7660068606283013,
+    "quality": "bad",
+    "event_f1": 0.6519607843137255,
+    "event_precision": 0.6273584905660378,
+    "event_recall": 0.6785714285714286,
+    "event_nmi": 0.20734830099902912,
+    "event_clusters": [
+      2
+    ],
+    "cluster_names": {
+      "0": "regular breathing",
+      "1": "regular breathing, mostly W",
+      "2": "hypopnea",
+      "3": "regular breathing #2",
+      "4": "regular breathing #3"
+    },
+    "stage_nmi": 0.10394558890036501,
+    "fit_seconds": 0.0,
+    "resumed": true
+  },
+  {
+    "algorithm": "dbscan",
+    "stage": "validation",
+    "n_windows": 1085,
+    "n_clusters": 3,
+    "n_noise": 1056,
+    "silhouette": 0.3147439112286854,
+    "calinski_harabasz": 16.287405296277925,
+    "davies_bouldin": 1.1810326568859628,
+    "quality": "fair",
+    "event_f1": 0.0,
+    "event_precision": 0.0,
+    "event_recall": 0.0,
+    "event_nmi": 0.0,
+    "event_clusters": [],
+    "cluster_names": {
+      "-1": "noise",
+      "0": "regular breathing, mostly W",
+      "1": "regular breathing",
+      "2": "regular breathing #2",
+      "3": "regular breathing #3",
+      "4": "regular breathing, mostly N2"
+    },
+    "stage_nmi": 0.35511146849678776,
+    "fit_seconds": 0.0,
+    "resumed": true
+  },
+  {
+    "algorithm": "isolation",
+    "stage": "validation",
+    "n_windows": 1085,
+    "n_clusters": 4,
+    "n_noise": 831,
+    "silhouette": -0.2395444169692725,
+    "calinski_harabasz": 3.5772929140920953,
+    "davies_bouldin": 1.368538514169519,
+    "quality": "bad",
+    "event_f1": 0.5653206650831354,
+    "event_precision": 0.5288888888888889,
+    "event_recall": 0.6071428571428571,
+    "event_nmi": 0.1192905640947736,
+    "event_clusters": [
+      5
+    ],
+    "cluster_names": {
+      "-1": "noise",
+      "0": "regular breathing, mostly W",
+      "1": "regular breathing",
+      "2": "regular breathing #2",
+      "3": "regular breathing #3",
+      "4": "regular breathing, mostly N2",
+      "5": "hypopnea"
+    },
+    "stage_nmi": 0.16813863471513152,
+    "fit_seconds": 0.0,
+    "resumed": true
+  }
+]

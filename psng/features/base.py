@@ -38,7 +38,7 @@ def breath_cycles(window: np.ndarray, sfreq: float, relative_peak_height: float 
     """Breaths per minute and coefficient of variation of breath intervals (0, 0 if fewer than 2 breaths)."""
     peaks, _ = find_peaks(
         window,
-        distance=int(sfreq * min_breath_seconds),
+        distance=max(1, int(sfreq * min_breath_seconds)),
         height=window.max() * relative_peak_height,
         prominence=0.5 * window.std(),
     )

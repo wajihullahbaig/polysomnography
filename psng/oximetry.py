@@ -41,6 +41,8 @@ def load_spo2(settings: Settings, stage: str) -> pd.DataFrame | None:
 def spo2_series(signal: SignalData, cfg: OximetrySettings) -> pd.DataFrame:
     """1 Hz SpO2 (median per second): values outside `valid_range` (probe off) are NaN, gaps up to `max_gap_seconds` interpolated."""
     sf = int(round(signal.sfreq))
+    if sf < 1:
+        raise ValueError(f"spo2_series requires sfreq >= 1 Hz, got {signal.sfreq}")
     seconds = len(signal.signal) // sf
     spo2 = np.median(np.asarray(signal.signal[: seconds * sf], float).reshape(seconds, sf), axis=1)
     low, high = cfg.valid_range

@@ -28,6 +28,7 @@ from psng.settings import EventSettings
 from psng.windows import RESPIRATORY_BAND_HZ, interpolate_nans
 
 EVENT_COLUMNS = ["start_time", "end_time", "duration", "kind", "min_flow"]
+SLEEP = tuple(s for s in SLEEP_STAGES if s != "W")
 _PRIORITY = ("apnea", "hypopnea", "artefact")  # when a window overlaps several kinds
 
 
@@ -35,6 +36,8 @@ _PRIORITY = ("apnea", "hypopnea", "artefact")  # when a window overlaps several 
 def flow_envelope(signal: SignalData, smoothing_seconds: float = 0.5, band_hz: tuple[float, float] = RESPIRATORY_BAND_HZ) -> pd.DataFrame:
     """1 Hz RMS envelope of the band-passed signal: columns `time` (second start) and `envelope`."""
     sf = int(round(signal.sfreq))
+    if sf < 1:
+        raise ValueError(f"flow_envelope requires sfreq >= 1 Hz, got {signal.sfreq}")
     x = interpolate_nans(np.asarray(signal.signal, dtype=float))
     n = int(smoothing_seconds * signal.sfreq) | 1
     if smoothing_seconds > 0:
@@ -130,29 +133,43 @@ def load_hypnogram(path: str | Path) -> pd.DataFrame:
 def window_stages(starts: np.ndarray, ends: np.ndarray, hypnogram: pd.DataFrame) -> np.ndarray:
     """Sleep stage of the epoch containing each window midpoint (`?` when the hypnogram does not cover it)."""
     mid = (np.asarray(starts, float) + np.asarray(ends, float)) / 2
-    ends_h = hypnogram["end_time"].to_numpy(float)
-    idx = np.searchsorted(ends_h, mid, side="right")
     stages = np.full(len(mid), "?", dtype=object)
+    if len(hypnogram) == 0 or len(mid) == 0:
+        return stages
+    ends_h = hypnogram["end_time"].to_numpy(float)
+    epoch = float(np.median(np.diff(ends_h))) if len(ends_h) > 1 else 30.0
+    idx = np.searchsorted(ends_h, mid, side="right")
     ok = idx < len(ends_h)
+    safe_idx = np.clip(idx, 0, len(ends_h) - 1)
+    ok &= mid >= ends_h[safe_idx] - epoch - 1e-9
     stages[ok] = hypnogram["stage"].to_numpy(object)[idx[ok]]
     return stages
 
 
+def sleep_hours_for_span(hypnogram: pd.DataFrame | None, start_seconds: float, duration_seconds: float) -> float | None:
+    """Hours scored as sleep (excluding W and unscored `?`) inside `[start_seconds, start_seconds + duration_seconds)`."""
+    if hypnogram is None or len(hypnogram) == 0:
+        return None
+    epoch = float(np.median(np.diff(hypnogram["end_time"]))) if len(hypnogram) > 1 else 30.0
+    mid = hypnogram["end_time"] - epoch / 2
+    in_span = (mid >= start_seconds) & (mid <= start_seconds + duration_seconds)
+    asleep = hypnogram[in_span & hypnogram["stage"].isin(SLEEP)]
+    return float(len(asleep) * epoch / 3600)
+
+
 # ------------------------------------------------------------------ summaries and scores
 def event_summary(stage: str, events: pd.DataFrame, event_labels: np.ndarray, stages: np.ndarray | None,
-                  duration_seconds: float, baseline_amplitude: float, hypnogram: pd.DataFrame | None = None) -> EventSummary:
+                  duration_seconds: float, baseline_amplitude: float, hypnogram: pd.DataFrame | None = None,
+                  start_seconds: float = 0.0) -> EventSummary:
     counts = events["kind"].value_counts() if len(events) else pd.Series(dtype=int)
     n_events = int(counts.get("apnea", 0) + counts.get("hypopnea", 0))
     hours = duration_seconds / 3600
-    sleep_hours = ahi = None
-    if hypnogram is not None and len(hypnogram):
-        epoch = float(np.median(np.diff(hypnogram["end_time"]))) if len(hypnogram) > 1 else 30.0
-        asleep = hypnogram[(hypnogram["stage"] != "W") & (hypnogram["end_time"] <= duration_seconds + epoch)]
-        sleep_hours = len(asleep) * epoch / 3600
-        if len(events) and sleep_hours > 0:
-            respiratory = events[events["kind"].isin(("apnea", "hypopnea"))]
-            in_sleep = window_stages(respiratory["start_time"].to_numpy(float), respiratory["start_time"].to_numpy(float), hypnogram)
-            ahi = float(np.isin(in_sleep, [s for s in SLEEP_STAGES if s != "W"]).sum() / sleep_hours)
+    sleep_hours = sleep_hours_for_span(hypnogram, start_seconds, duration_seconds)
+    ahi = None
+    if hypnogram is not None and len(hypnogram) and len(events) and sleep_hours and sleep_hours > 0:
+        respiratory = events[events["kind"].isin(("apnea", "hypopnea"))]
+        in_sleep = window_stages(respiratory["start_time"].to_numpy(float), respiratory["start_time"].to_numpy(float), hypnogram)
+        ahi = float(np.isin(in_sleep, SLEEP).sum() / sleep_hours)
     return EventSummary(
         stage=stage, duration_hours=hours, sleep_hours=sleep_hours, n_windows=len(event_labels),
         apnea=int(counts.get("apnea", 0)), hypopnea=int(counts.get("hypopnea", 0)), artefact=int(counts.get("artefact", 0)),

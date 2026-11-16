@@ -16,5 +16,5 @@ EXTRACTORS: dict[str, type[FeatureExtractor]] = {
 }
 
 
-def make_extractor(name: str, sfreq: float) -> FeatureExtractor:
-    return EXTRACTORS[name](sfreq)
+def make_extractor(name: str, sfreq: float, **kwargs) -> FeatureExtractor:
+    return EXTRACTORS[name](sfreq, **kwargs)

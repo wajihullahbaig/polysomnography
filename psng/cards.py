@@ -21,7 +21,7 @@ from psng.hmm import GaussianHMM, hmm_observation
 from psng.oximetry import window_intervals
 from psng.plots import EVENT_COLORS, NORMAL_COLOR, STAGE_NAMES, cluster_color, cluster_name, save_card, save_examples_grid
 from psng.settings import Settings
-from psng.supervised import event_classifier
+from psng.supervised import BACKEND_LABEL, event_classifier
 
 STATE_COLORS = {"absent flow": EVENT_COLORS["apnea"], "reduced flow": "#e6550d", "normal breathing": NORMAL_COLOR, "large breaths": "#2c7fb8"}
 KIND_COLORS = {"normal": NORMAL_COLOR, **EVENT_COLORS}
@@ -71,9 +71,10 @@ class CardBuilder:
 
     def __init__(self, settings: Settings, recordings: dict[str, Recording], seconds: float = 600.0):
         self.settings, self.recordings, self.out = settings, recordings, settings.run.output_dir
+        self._xgboost_cache: dict[str, tuple[pd.DataFrame, np.ndarray] | None] = {}
         self.obs = {}
         for stage, rec in recordings.items():
-            env = flow_envelope(rec.signal, settings.data.smoothing_seconds)
+            env = rec.envelope(settings.data.smoothing_seconds)
             _, y = hmm_observation(env["envelope"].to_numpy(float), settings.events, settings.hmm.smoothing_seconds)
             self.obs[stage] = (env["time"].to_numpy(float), y, env)
         self.rules = {s: r.events[r.events["kind"].isin(RESPIRATORY)] for s, r in recordings.items()}
@@ -190,11 +191,16 @@ class CardBuilder:
 
     # -------------------------------------------------------------- XGBoost
     def xgboost(self, model_csv: str) -> tuple[pd.DataFrame, np.ndarray] | None:
+        if model_csv in self._xgboost_cache:
+            return self._xgboost_cache[model_csv]
         paths = [self.out / s / "csvs" / model_csv for s in ("training", "validation")]
         if not all(p.exists() for p in paths):
+            self._xgboost_cache[model_csv] = None
             return None
         train, val = (pd.read_csv(p) for p in paths)
-        return val, event_classifier(train, val)[1]
+        result = (val, event_classifier(train, val)[1])
+        self._xgboost_cache[model_csv] = result
+        return result
 
     def xgboost_card(self, model_csv: str) -> Path | None:
         result = self.xgboost(model_csv)
@@ -210,11 +216,12 @@ class CardBuilder:
         values = np.array([[np.mean(said[actual == a] == p) for p in ("normal", "event")] for a in ("normal", "event")])
         counts = {(i, j): f"\n{int(((actual == a) & (said == p)).sum())} windows" for i, a in enumerate(("normal", "event")) for j, p in enumerate(("normal", "event"))}
         return self.save("xgboost", {
-            "title": "XGBoost: a supervised model taught by the rules on night 1",
+            "title": f"{BACKEND_LABEL}: a supervised model taught by the rules on night 1",
             "subtitle": "It learns from the rule labels of night 1 and is tested on night 2; it shows how much event information the 12 window measurements carry.",
             "excerpt": self.excerpt((val.loc[win, "window_start_time"], val.loc[win, "window_end_time"], said[win.to_numpy()]), colors, legend,
-                                    {"XGBoost": as_events(*window_intervals(val["window_start_time"], val["window_end_time"], said == "event"))}, "model decision"),
-            "density": {"y": y, "curves": density_curves(y, labels, colors, legend), "title": "What the model's two classes look like (night 2)"},
+                                    {BACKEND_LABEL: as_events(*window_intervals(val["window_start_time"], val["window_end_time"], said == "event"))}, "model decision"),
+            "density": {"y": y, "curves": density_curves(y, labels, colors, legend),
+                        "title": "What the model's two classes look like (night 2)", "hist_label": "night 2, all seconds"},
             "matrix": {"values": values, "rows": ["rules: normal", "rules: event"], "cols": ["model: normal", "model: event"], "extra": counts,
                        "title": "Agreement with the rules on night 2 (share of each row)"},
         })

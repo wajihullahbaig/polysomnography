@@ -403,18 +403,20 @@ fine for offline scoring but would need the causal Kalman filter for on-line use
 | gmm | training | 5 | 0 | 0.166 | 2.120 | 181.6 | 0.000 | 0.000 | 0.000 | 0.084 | 0.084 |
 | dbscan | training | 1 | 137 | - | - | - | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 | isolation | training | 2 | 81 | **0.540** | 3.163 | 50.7 | 0.000 | 0.000 | 0.000 | 0.047 | 0.023 |
-| kmeans | validation | 5 | 0 | 0.171 | **1.138** | 233.6 | **0.707** | 0.678 | 0.740 | 0.221 | 0.109 |
-| minibatch | validation | 5 | 0 | 0.163 | 1.183 | 227.9 | 0.707 | 0.668 | **0.750** | 0.215 | **0.120** |
-| bisecting | validation | 5 | 0 | 0.197 | 1.401 | **295.5** | 0.663 | **0.753** | 0.592 | **0.226** | 0.098 |
-| gmm | validation | 5 | 0 | 0.034 | 1.800 | 98.2 | 0.601 | 0.527 | 0.699 | 0.156 | 0.109 |
+| kmeans | validation | 5 | 0 | 0.171 | **1.138** | 233.6 | **0.707** | 0.678 | 0.740 | 0.221 | 0.126 |
+| minibatch | validation | 5 | 0 | 0.163 | 1.183 | 227.9 | 0.707 | 0.668 | **0.750** | 0.215 | **0.134** |
+| bisecting | validation | 5 | 0 | 0.197 | 1.401 | **295.5** | 0.663 | **0.753** | 0.592 | **0.226** | 0.129 |
+| gmm | validation | 5 | 0 | 0.034 | 1.800 | 98.2 | 0.601 | 0.527 | 0.699 | 0.156 | 0.107 |
 | dbscan | validation | 1 | 394 | - | - | - | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
-| isolation | validation | 2 | 149 | **0.446** | 1.829 | 183.9 | 0.000 | 0.000 | 0.000 | 0.153 | 0.039 |
+| isolation | validation | 2 | 149 | **0.446** | 1.829 | 183.9 | 0.000 | 0.000 | 0.000 | 0.153 | 0.036 |
 
 Silhouette is modest for every model because breathing varies continuously; the isolation forest scores highest
 on silhouette only because it isolates a small outlier group. Event F1 and NMI are the metrics that matter for
 the goal.
 
-### Feature spaces side by side (validation event F1)
+### Feature spaces side by side
+
+Validation event F1 summary:
 
 | algorithm | autoencoder3 | pca3 | raw |
 |---|---|---|---|
@@ -426,8 +428,47 @@ the goal.
 | minibatch | 0.603 | 0.707 | 0.631 |
 
 PCA (3 components) and the raw 12 features tie for k-means; PCA keeps the clusters tighter (silhouette 0.17 vs
-0.07) so it stays the default. The autoencoder bottleneck is worse on this small data set. Full table:
-`outputs/comparison/spaces.md`.
+0.07) so it stays the default. The autoencoder bottleneck is worse on this small data set. Full metrics across all
+three spaces (`outputs/comparison/spaces.md`, best per metric and stage in bold):
+
+| space | algorithm | stage | n_clusters | n_noise | silhouette | davies_bouldin | event_f1 | event_precision | event_recall | event_nmi | stage_nmi |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| autoencoder3 | bisecting | training | 5 | 0 | 0.227 | 1.253 | 0.000 | 0.000 | 0.000 | 0.099 | 0.051 |
+| pca3 | bisecting | training | 5 | 0 | 0.265 | 1.250 | 0.433 | 0.778 | 0.300 | 0.143 | 0.079 |
+| raw | bisecting | training | 5 | 0 | 0.175 | 1.785 | 0.406 | **0.809** | 0.271 | 0.147 | 0.071 |
+| autoencoder3 | dbscan | training | 1 | 0 | - | - | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| pca3 | dbscan | training | 1 | 137 | - | - | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| raw | dbscan | training | 5 | 1013 | 0.237 | **0.903** | 0.000 | 0.000 | 0.000 | 0.000 | 0.268 |
+| autoencoder3 | gmm | training | 5 | 0 | 0.113 | 2.326 | 0.000 | 0.000 | 0.000 | 0.076 | 0.063 |
+| pca3 | gmm | training | 5 | 0 | 0.166 | 2.120 | 0.000 | 0.000 | 0.000 | 0.084 | 0.084 |
+| raw | gmm | training | 5 | 0 | 0.056 | 2.206 | 0.553 | 0.684 | 0.464 | 0.149 | 0.162 |
+| autoencoder3 | isolation | training | 2 | 0 | 0.447 | 3.200 | 0.000 | 0.000 | 0.000 | 0.025 | 0.012 |
+| pca3 | isolation | training | 2 | 81 | **0.540** | 3.163 | 0.000 | 0.000 | 0.000 | 0.047 | 0.023 |
+| raw | isolation | training | 6 | 956 | 0.122 | 1.330 | 0.325 | 0.561 | 0.229 | **0.284** | **0.375** |
+| autoencoder3 | kmeans | training | 5 | 0 | 0.275 | 1.103 | **0.599** | 0.551 | **0.657** | 0.122 | 0.067 |
+| pca3 | kmeans | training | 5 | 0 | 0.252 | 1.133 | 0.580 | 0.605 | 0.557 | 0.130 | 0.086 |
+| raw | kmeans | training | 5 | 0 | 0.134 | 1.734 | 0.562 | 0.695 | 0.471 | 0.128 | 0.091 |
+| autoencoder3 | minibatch | training | 5 | 0 | 0.260 | 1.147 | 0.000 | 0.000 | 0.000 | 0.119 | 0.063 |
+| pca3 | minibatch | training | 5 | 0 | 0.251 | 1.147 | 0.573 | 0.576 | 0.571 | 0.129 | 0.079 |
+| raw | minibatch | training | 5 | 0 | 0.118 | 1.977 | 0.000 | 0.000 | 0.000 | 0.130 | 0.067 |
+| autoencoder3 | bisecting | validation | 5 | 0 | 0.155 | 1.350 | 0.477 | 0.606 | 0.393 | 0.089 | 0.083 |
+| pca3 | bisecting | validation | 5 | 0 | 0.197 | 1.401 | 0.663 | 0.753 | 0.592 | 0.226 | 0.129 |
+| raw | bisecting | validation | 5 | 0 | 0.133 | 1.603 | 0.674 | **0.766** | 0.602 | **0.234** | 0.120 |
+| autoencoder3 | dbscan | validation | 1 | 2 | - | - | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| pca3 | dbscan | validation | 1 | 394 | - | - | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
+| raw | dbscan | validation | 3 | 1056 | 0.315 | 1.181 | 0.000 | 0.000 | 0.000 | 0.000 | **0.348** |
+| autoencoder3 | gmm | validation | 5 | 0 | 0.001 | 2.205 | 0.000 | 0.000 | 0.000 | 0.095 | 0.101 |
+| pca3 | gmm | validation | 5 | 0 | 0.034 | 1.800 | 0.601 | 0.527 | 0.699 | 0.156 | 0.107 |
+| raw | gmm | validation | 5 | 0 | -0.015 | 1.766 | 0.652 | 0.627 | 0.679 | 0.207 | 0.111 |
+| autoencoder3 | isolation | validation | 2 | 0 | 0.337 | 2.314 | 0.000 | 0.000 | 0.000 | 0.131 | 0.016 |
+| pca3 | isolation | validation | 2 | 149 | **0.446** | 1.829 | 0.000 | 0.000 | 0.000 | 0.153 | 0.036 |
+| raw | isolation | validation | 4 | 831 | -0.240 | 1.369 | 0.565 | 0.529 | 0.607 | 0.119 | 0.166 |
+| autoencoder3 | kmeans | validation | 5 | 0 | 0.175 | 1.248 | 0.620 | 0.652 | 0.592 | 0.155 | 0.084 |
+| pca3 | kmeans | validation | 5 | 0 | 0.171 | **1.138** | 0.707 | 0.678 | 0.740 | 0.221 | 0.126 |
+| raw | kmeans | validation | 5 | 0 | 0.066 | 1.594 | **0.708** | 0.711 | 0.704 | 0.230 | 0.119 |
+| autoencoder3 | minibatch | validation | 5 | 0 | 0.195 | 1.227 | 0.603 | 0.594 | 0.612 | 0.147 | 0.093 |
+| pca3 | minibatch | validation | 5 | 0 | 0.163 | 1.183 | 0.707 | 0.668 | **0.750** | 0.215 | 0.134 |
+| raw | minibatch | validation | 5 | 0 | 0.068 | 1.718 | 0.631 | 0.669 | 0.597 | 0.214 | 0.116 |
 
 ![spaces](docs/figures/spaces.png)
 
@@ -456,12 +497,12 @@ Top features: longest_low_flow_seconds (0.35), apnea_fraction (0.15), envelope_c
 | training | k-means, event clusters | 10.3 | 0.849 | 0.272 | 3.12 | 0.432 | 0.573 |
 | training | mini-batch, event clusters | 11.1 | 0.860 | 0.272 | 3.16 | 0.484 | 0.619 |
 | training | bisecting, event clusters | 6.0 | **0.903** | 0.261 | 3.46 | 0.265 | 0.409 |
-| validation | rules, rolling median | 19.2 | 0.701 | 0.180 | **3.90** | 0.475 | 0.567 |
-| validation | rules, Kalman | 28.5 | 0.651 | 0.185 | 3.52 | **0.623** | 0.637 |
-| validation | HMM, reduced-flow state | 23.4 | 0.698 | 0.186 | 3.76 | 0.598 | 0.644 |
+| validation | rules, rolling median | 19.3 | 0.701 | 0.180 | **3.90** | 0.475 | 0.567 |
+| validation | rules, kalman | 28.6 | 0.651 | 0.185 | 3.52 | **0.623** | 0.637 |
+| validation | HMM, reduced-flow state | 23.5 | 0.698 | 0.186 | 3.76 | 0.598 | 0.644 |
 | validation | k-means, event clusters | 8.4 | 0.921 | 0.249 | 3.69 | 0.516 | 0.662 |
-| validation | mini-batch, event clusters | 8.6 | **0.923** | 0.252 | 3.67 | 0.533 | 0.676 |
-| validation | bisecting, event clusters | 6.6 | 0.900 | 0.236 | 3.82 | 0.344 | 0.498 |
+| validation | mini-batch, event clusters | 8.7 | **0.923** | 0.252 | 3.67 | 0.533 | 0.676 |
+| validation | bisecting, event clusters | 6.7 | 0.900 | 0.236 | 3.82 | 0.344 | 0.498 |
 | validation | XGBoost on rule labels | 10.6 | 0.917 | 0.246 | 3.72 | 0.607 | **0.730** |
 
 GMM, DBSCAN and the isolation forest have no event cluster on night 1, so they have no row. What the table says:
@@ -502,7 +543,7 @@ python -m psng compare --docs docs       # PCA vs raw vs autoencoder for every m
 python -m psng sweep --model kmeans --k-min 2 --k-max 12
 python -m psng train | validate | report
 python -m psng train --no-resume         # ignore caches and refit everything
-python -m pytest                         # 41 tests on synthetic breathing and SpO2 signals
+python -m pytest                         # 45 tests on synthetic breathing and SpO2 signals
 ```
 
 Run from the repository root. `.vscode/launch.json` has a debug configuration for every command and for the

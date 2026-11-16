@@ -12,8 +12,8 @@ import pandas as pd
 from psng.cards import build_cards
 from psng.clustering import make_clusterer
 from psng.data import EventSummary
-from psng.events import (baseline_variants, detect_events, event_summary, flow_envelope, load_hypnogram,
-                         window_event_labels)
+from psng.events import (baseline_variants, detect_events, event_summary, load_hypnogram,
+                         sleep_hours_for_span, window_event_labels)
 from psng.examples import Recording, example_figures, load_recordings
 from psng.metrics import evaluate, read_metrics
 from psng.oximetry import desaturation_scores, load_spo2, window_intervals
@@ -23,7 +23,7 @@ from psng.transform import FeatureTransformer
 from psng.plots import (COMPARISON_METRICS, save_comparison, save_embedding, save_event_rates, save_importances, save_kalman_excerpt,
                         save_latent_spaces, save_oximetry_excerpt, save_oximetry_scores, save_spaces_heatmap, save_sweep)
 from psng.settings import ReductionSettings, Settings
-from psng.supervised import event_classifier, run_supervised
+from psng.supervised import BACKEND_LABEL, event_classifier, run_supervised
 
 STAGES = ("training", "validation")
 SPACES = {  # feature spaces compared by `python -m psng compare`
@@ -204,7 +204,7 @@ def baseline_comparison(settings: Settings, recordings: dict[str, Recording]) ->
     """Events found per night with the rolling-median and the Kalman baseline (same thresholds); writes comparison/baselines.csv."""
     rows = []
     for stage, rec in recordings.items():
-        envelope = flow_envelope(rec.signal, settings.data.smoothing_seconds)
+        envelope = rec.envelope(settings.data.smoothing_seconds)
         segment = settings.segment(stage)
         hypnogram = load_hypnogram(segment.hypnogram_path) if segment.hypnogram_path else None
         starts = np.arange(rec.signal.start_time, rec.signal.start_time + rec.signal.duration - settings.data.window_seconds + 1e-9, settings.data.window_seconds)
@@ -212,7 +212,7 @@ def baseline_comparison(settings: Settings, recordings: dict[str, Recording]) ->
             cfg = settings.events.model_copy(update={"baseline": method})
             events = detect_events(envelope, cfg)
             labels = window_event_labels(starts, starts + settings.data.window_seconds, events, cfg.min_overlap_seconds)
-            summary = event_summary(stage, events, labels, None, rec.signal.duration, rec.baseline, hypnogram)
+            summary = event_summary(stage, events, labels, None, rec.signal.duration, rec.baseline, hypnogram, start_seconds=rec.signal.start_time)
             rows.append({"stage": stage, "baseline": method, **summary.model_dump(include={"apnea", "hypopnea", "artefact", "events_per_hour", "ahi", "event_window_fraction"})})
     table = pd.DataFrame(rows)
     table.to_csv(settings.run.output_dir / "comparison" / "baselines.csv", index=False)
@@ -225,7 +225,7 @@ def kalman_figure(settings: Settings, recordings: dict[str, Recording], seconds:
     if not recordings:
         return None
     stage, rec = list(recordings.items())[-1]
-    envelope = flow_envelope(rec.signal, settings.data.smoothing_seconds)
+    envelope = rec.envelope(settings.data.smoothing_seconds)
     env = envelope["envelope"].to_numpy(float)
     baselines = baseline_variants(env, settings.events)
     events = {m: detect_events(envelope, settings.events.model_copy(update={"baseline": m})) for m in baselines}
@@ -264,7 +264,7 @@ def embedding_figure(output_dir: Path, model: str, perplexity: float = 30.0) -> 
         return None
     transformer = FeatureTransformer.load(output_dir / "training" / "models" / "feature_transformer.pkl")
     points = {s: TSNE(n_components=2, perplexity=min(perplexity, len(f) - 1), random_state=0, init="pca").fit_transform(
-        transformer.transform(feature_matrix(f.drop(columns=["cluster_id", "cluster_label"]))).to_numpy(float)) for s, f in frames.items()}
+        transformer.transform(feature_matrix(f.drop(columns=["cluster_id", "cluster_label"], errors="ignore"))).to_numpy(float)) for s, f in frames.items()}
     profile = output_dir / "training" / "csvs" / f"{model}_clusters.csv"
     names = dict(zip(*(pd.read_csv(profile)[c] for c in ("cluster_id", "name")))) if profile.exists() else {}
     (output_dir / "comparison").mkdir(parents=True, exist_ok=True)
@@ -302,8 +302,9 @@ def compare_spaces(settings: Settings, spaces: dict[str, dict] = SPACES) -> tupl
     if supervised is not None:
         reference = {"event_f1": supervised.validation_f1}
         if supervised.importances:
-            save_importances(supervised.importances, "What XGBoost looks at to spot an event window", comparison / "feature_importance.png")
+            save_importances(supervised.importances, f"What {BACKEND_LABEL} looks at to spot an event window", comparison / "feature_importance.png")
     save_spaces_heatmap(results, comparison / "spaces.png", reference=reference)
+    latent_figure(base)
 
     columns = ["space", "algorithm", "stage", "n_clusters", "n_noise", "silhouette", "davies_bouldin", "event_f1", "event_precision", "event_recall", "event_nmi", "stage_nmi"]
     lines = ["## Feature spaces side by side", "", _markdown_table(results[columns].sort_values(["stage", "algorithm", "space"]), {c: "{:.3f}" for c in columns[5:]}), ""]
@@ -326,7 +327,7 @@ def detector_intervals(settings: Settings, rec: Recording, models: list[str], st
 
     Event clusters are the ones chosen on the training night, so validation is scored without looking at its labels.
     """
-    envelope = flow_envelope(rec.signal, settings.data.smoothing_seconds)
+    envelope = rec.envelope(settings.data.smoothing_seconds)
     out = {}
     for method in ("rolling_median", "kalman"):
         events = detect_events(envelope, settings.events.model_copy(update={"baseline": method}))
@@ -348,7 +349,7 @@ def detector_intervals(settings: Settings, rec: Recording, models: list[str], st
     if stage == "validation" and paths and all(p.exists() for p in paths):
         train, validation = (pd.read_csv(p) for p in paths)
         _, probability = event_classifier(train, validation)
-        out["XGBoost on rule labels"] = window_intervals(validation["window_start_time"], validation["window_end_time"], probability >= 0.5)
+        out[f"{BACKEND_LABEL} on rule labels"] = window_intervals(validation["window_start_time"], validation["window_end_time"], probability >= 0.5)
     return out
 
 
@@ -362,7 +363,9 @@ def oximetry_comparison(settings: Settings, recordings: dict[str, Recording], mo
         desaturations = pd.read_csv(path)
         segment = settings.segment(stage)
         hypnogram = load_hypnogram(segment.hypnogram_path) if segment.hypnogram_path else None
-        hours = (hypnogram["stage"] != "W").sum() * 30 / 3600 if hypnogram is not None else rec.signal.duration / 3600
+        hours = sleep_hours_for_span(hypnogram, rec.signal.start_time, rec.signal.duration)
+        if hours is None:
+            hours = rec.signal.duration / 3600
         span = (rec.signal.start_time, rec.signal.start_time + rec.signal.duration)
         for method, (starts, ends) in detector_intervals(settings, rec, models, stage).items():
             scores = desaturation_scores(starts, ends, desaturations, settings.oximetry, span, hypnogram)
@@ -382,7 +385,7 @@ def oximetry_figure(settings: Settings, recordings: dict[str, Recording], second
     spo2, path = load_spo2(settings, stage), settings.run.output_dir / stage / "desaturations.csv"
     if spo2 is None or not path.exists():
         return None
-    envelope = flow_envelope(rec.signal, settings.data.smoothing_seconds)
+    envelope = rec.envelope(settings.data.smoothing_seconds)
     events = rec.events
     linked = events[events["desaturation"].notna()] if "desaturation" in events.columns else events
     starts = np.arange(rec.signal.start_time, rec.signal.start_time + rec.signal.duration - seconds + 1, 300.0)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pywt
 
-from psng.features.base import FeatureExtractor
+from psng.features.base import FeatureExtractor, power_entropy
 
 
 class WaveletFeatures(FeatureExtractor):
@@ -21,5 +21,5 @@ class WaveletFeatures(FeatureExtractor):
             out[f"mean_level_{i}"] = float(coeff.mean())
             out[f"std_level_{i}"] = float(coeff.std())
             out[f"energy_level_{i}"] = float(sq.sum())
-            out[f"entropy_level_{i}"] = float((sq * np.log(sq + 1e-10)).sum())
+            out[f"entropy_level_{i}"] = power_entropy(sq)
         return out

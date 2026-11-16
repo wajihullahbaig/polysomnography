@@ -1,0 +1,17 @@
+{
+  "stage": "validation",
+  "duration_hours": 9.049166666666666,
+  "sleep_hours": 4.508333333333334,
+  "n_windows": 1085,
+  "apnea": 18,
+  "hypopnea": 192,
+  "artefact": 2,
+  "events_per_hour": 23.206556773183536,
+  "ahi": 23.512014787430683,
+  "event_window_fraction": 0.2350230414746544,
+  "baseline_amplitude": 26.902517768467607,
+  "desaturations": 252,
+  "odi": 27.060998151571162,
+  "confirmed_fraction": 0.6981132075471698,
+  "ahi_confirmed": 17.30129390018484
+}

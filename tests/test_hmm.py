@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from psng.events import flow_envelope
 from psng.hmm import GaussianHMM, fit_hmm, hmm_events
@@ -33,3 +34,11 @@ def test_hmm_finds_the_synthetic_events_and_names_states(tmp_path):
     assert set(events["kind"]) <= {"apnea", "hypopnea"} and (events["kind"] == "apnea").sum() == 2
     model.save(tmp_path / "hmm.pkl")
     assert np.allclose(GaussianHMM.load(tmp_path / "hmm.pkl").transitions_, model.transitions_)
+
+
+def test_hmm_handles_constant_and_empty_sequences():
+    constant = GaussianHMM(3).fit(np.zeros(200))
+    assert np.isfinite(constant.means_).all() and np.isfinite(constant.transitions_).all()
+    assert constant.decode(np.array([])).size == 0
+    with pytest.raises(ValueError):
+        GaussianHMM(2).fit(np.array([]))

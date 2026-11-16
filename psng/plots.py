@@ -310,7 +310,9 @@ def save_comparison(metrics: pd.DataFrame, path: Path) -> None:
     ax.imshow(shade, cmap="Blues", vmin=0, vmax=1.15, aspect="auto")
     for (i, j), v in np.ndenumerate(values):
         best = np.isfinite(v) and shade[i, j] == 1
-        ax.text(j, i, "-" if not np.isfinite(v) else f"{v:.2f}" if abs(v) < 100 else f"{v:.0f}", ha="center", va="center", fontsize=8.5,
+        metric = columns[j][0]
+        label = "-" if not np.isfinite(v) else f"{v:.0f}" if metric == "calinski_harabasz" else f"{v:.2f}"
+        ax.text(j, i, label, ha="center", va="center", fontsize=8.5,
                 color="white" if shade[i, j] > 0.6 else "#1a1a1a", weight="bold" if best else "normal")
     ax.set_xticks(range(len(columns)), ["night 1" if st == "training" else "night 2" for _, _, st in columns], fontsize=8)
     ax.set_yticks(range(len(algorithms)), algorithms)
@@ -417,10 +419,12 @@ def save_examples_grid(examples: dict[str, dict[str, list[dict]]], title: str, p
                 ax.set_title(sl["label"], fontsize=7, pad=2)
                 if si * per_stage + j == 0:
                     ax.set_ylabel(row, fontsize=8, rotation=0, ha="right", va="center")
-    for si, stage in enumerate(stages):
-        fig.text((si + 0.5) / len(stages), 0.995, NIGHT.get(stage, stage), ha="center", va="top", fontsize=11, color=STAGE_COLORS.get(stage), weight="bold")
     fig.suptitle(title, y=1.03, fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    for si, stage in enumerate(stages):
+        left = axes[0, si * per_stage].get_position().x0
+        right = axes[0, (si + 1) * per_stage - 1].get_position().x1
+        fig.text((left + right) / 2, 0.995, NIGHT.get(stage, stage), ha="center", va="top", fontsize=11, color=STAGE_COLORS.get(stage), weight="bold")
     fig.savefig(path, dpi=130, bbox_inches="tight")
     plt.close(fig)
 
@@ -433,7 +437,7 @@ def save_spaces_heatmap(results: pd.DataFrame, path: Path, metrics=(("event_f1",
     algorithms = list(dict.fromkeys(results["algorithm"]))
     spaces = list(dict.fromkeys(results["space"]))
     stages = [s for s in ("training", "validation") if s in set(results["stage"])]
-    fig, axes = plt.subplots(len(stages), len(metrics), figsize=(3.2 * len(metrics) + 1, 0.45 * len(algorithms) * len(stages) + 2), squeeze=False)
+    fig, axes = plt.subplots(len(stages), len(metrics), figsize=(3.6 * len(metrics) + 1.2, 0.45 * len(algorithms) * len(stages) + 2.2), squeeze=False)
     for r, stage in enumerate(stages):
         for c, (metric, label) in enumerate(metrics):
             ax = axes[r, c]
@@ -450,9 +454,9 @@ def save_spaces_heatmap(results: pd.DataFrame, path: Path, metrics=(("event_f1",
                     ax.text(j, i, "-" if not finite[i, j] else f"{v:.2f}", ha="center", va="center", fontsize=8, color="white" if dark else "#222")
             ax.set_xticks(range(len(spaces)), spaces)
             ax.set_yticks(range(len(algorithms)), algorithms if c == 0 else [])
-            title = f"{label} - {NIGHT.get(stage, stage)}"
+            title = f"{label}\n{NIGHT.get(stage, stage)}"
             if reference and metric in reference and stage == "validation":
-                title += f"\n(supervised reference {reference[metric]:.2f})"
+                title += f" (supervised {reference[metric]:.2f})"
             ax.set_title(title)
     fig.tight_layout()
     _header(fig, "Does compressing the features help?",
@@ -540,8 +544,11 @@ def save_supervised(frame: pd.DataFrame, probability: np.ndarray, auc: float | N
     fig = plt.figure(figsize=(15, 4.4))
     grid = fig.add_gridspec(2, 2, height_ratios=[3, 0.5], width_ratios=[4, 1.25], hspace=0.12, wspace=0.18)
     ax = fig.add_subplot(grid[0, 0])
-    ax.fill_between(np.repeat(np.c_[start, end].ravel(), 1), 0, np.repeat(probability, 2), color=FLOW_FILL, linewidth=0)
-    ax.plot(np.c_[start, end].ravel(), np.repeat(probability, 2), color=FLOW_COLOR, linewidth=0.5)
+    overlapping = len(start) > 1 and (start[1:] < end[:-1]).any()
+    xs = (start + end) / 2 if overlapping else np.c_[start, end].ravel()
+    ys = probability if overlapping else np.repeat(probability, 2)
+    ax.fill_between(xs, 0, ys, color=FLOW_FILL, linewidth=0)
+    ax.plot(xs, ys, color=FLOW_COLOR, linewidth=0.5)
     ax.axhline(0.5, color="#444", linestyle=":", linewidth=0.8)
     ax.text(end[-1], 0.52, "decision line ", ha="right", va="bottom", fontsize=8, color="#444")
     ax.set(ylabel="model confidence\nthat a window is an event", ylim=(0, 1), xlim=(start[0], end[-1]))
@@ -629,6 +636,7 @@ def save_oximetry_excerpt(envelope: pd.DataFrame, events: pd.DataFrame, spo2: pd
         linked = np.isfinite(getattr(r, "desaturation", np.nan))
         ax.axvspan((r.start_time - start) / 60, (r.end_time - start) / 60, color=EVENT_COLORS[r.kind], alpha=0.45 if linked else 0.12,
                    hatch=None if linked else "///", linewidth=0)
+    ax.axhline(1, color="#999", linewidth=0.6, linestyle=":")
     ax.set(ylabel="breathing vs typical night", ylim=(0, 2.5))
     ax.legend(handles=[Patch(color="#9ecae1", label="breathing strength (3 s mean)"),
                        *[Patch(color=c, alpha=0.45, label=f"{k}, confirmed") for k, c in EVENT_COLORS.items() if k != "artefact"],
@@ -661,7 +669,7 @@ def save_card(card: dict, path: Path) -> None:
     """
     ex, dens_cfg, mat_cfg = card["excerpt"], card["density"], card["matrix"]
     fig = plt.figure(figsize=(15, 8.4))
-    grid = fig.add_gridspec(3, 2, height_ratios=[2.2, 0.9, 2.4], width_ratios=[1.6, 1], hspace=0.5, wspace=0.28)
+    grid = fig.add_gridspec(3, 2, height_ratios=[2.2, 0.9, 2.4], width_ratios=[1.6, 1], hspace=0.5, wspace=0.34)
     ax = fig.add_subplot(grid[0, :])
     start = ex["time"][0]
     minutes = (ex["time"] - start) / 60
@@ -687,7 +695,8 @@ def save_card(card: dict, path: Path) -> None:
     dens = fig.add_subplot(grid[2, 0])
     y = dens_cfg["y"]
     lo, hi = np.log(0.03), np.log(5)
-    dens.hist(np.clip(y, lo, hi), bins=np.linspace(lo, hi, 120), density=True, color="#e0e0e0", linewidth=0, label="night 1, all seconds")
+    in_range = y[(y >= lo) & (y <= hi)]
+    dens.hist(in_range, bins=np.linspace(lo, hi, 120), density=True, color="#e0e0e0", linewidth=0, label=dens_cfg.get("hist_label", "night 1, all seconds"))
     for label, color, gy, pdf in dens_cfg["curves"]:
         dens.plot(gy, pdf, color=color if color != NORMAL_COLOR else "#7f7f7f", linewidth=2, label=label)
     ticks = [0.05, 0.1, 0.3, 0.7, 1, 2, 4]

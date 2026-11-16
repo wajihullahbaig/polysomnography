@@ -52,11 +52,11 @@ class GaussianHMM:
         b, A, n = self._emissions(y), self.transitions_, len(y)
         alpha, beta, c = np.empty((n, self.n_states)), np.ones((n, self.n_states)), np.empty(n)
         alpha[0] = self.start_ * b[0]
-        c[0] = alpha[0].sum()
+        c[0] = max(float(alpha[0].sum()), 1e-300)
         alpha[0] /= c[0]
         for t in range(1, n):
             alpha[t] = (alpha[t - 1] @ A) * b[t]
-            c[t] = alpha[t].sum()
+            c[t] = max(float(alpha[t].sum()), 1e-300)
             alpha[t] /= c[t]
         for t in range(n - 2, -1, -1):
             beta[t] = A @ (b[t + 1] * beta[t + 1]) / c[t + 1]
@@ -66,18 +66,21 @@ class GaussianHMM:
 
     def fit(self, y: np.ndarray) -> GaussianHMM:
         y = np.asarray(y, float)
+        if len(y) == 0:
+            raise ValueError("cannot fit GaussianHMM on an empty sequence")
         k = self.n_states
         self.means_ = np.quantile(y, np.linspace(0.1, 0.9, k))  # spread over the observed range
-        self.vars_ = np.full(k, y.var() / k)
+        self.vars_ = np.full(k, max(float(y.var()) / k, 1e-4))
         self.transitions_ = np.full((k, k), (1 - self.stay) / max(k - 1, 1))
         np.fill_diagonal(self.transitions_, self.stay if k > 1 else 1.0)
         self.start_ = np.full(k, 1 / k)
         self.log_likelihood_ = -np.inf
         for self.n_iter_ in range(1, self.max_iter + 1):
             gamma, xi, ll = self._forward_backward(y)
-            weight = gamma.sum(axis=0)
+            weight = np.maximum(gamma.sum(axis=0), 1e-12)
             self.start_ = (gamma[0] + 1e-6) / (gamma[0] + 1e-6).sum()
-            self.transitions_ = xi / xi.sum(axis=1, keepdims=True)
+            xi_sum = np.maximum(xi.sum(axis=1, keepdims=True), 1e-12)
+            self.transitions_ = xi / xi_sum
             self.means_ = gamma.T @ y / weight
             self.vars_ = np.maximum((gamma * (y[:, None] - self.means_) ** 2).sum(axis=0) / weight, 1e-4)
             done = ll - self.log_likelihood_ < self.tol * len(y)
@@ -91,7 +94,10 @@ class GaussianHMM:
 
     def decode(self, y: np.ndarray) -> np.ndarray:
         """Viterbi: the most likely state sequence."""
-        logb, logA = np.log(self._emissions(np.asarray(y, float))), np.log(self.transitions_ + 1e-300)
+        y = np.asarray(y, float)
+        if len(y) == 0:
+            return np.array([], dtype=int)
+        logb, logA = np.log(self._emissions(y)), np.log(self.transitions_ + 1e-300)
         n = len(logb)
         back = np.empty((n, self.n_states), dtype=int)
         score = np.log(self.start_) + logb[0]

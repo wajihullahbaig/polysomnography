@@ -14,7 +14,7 @@ import pandas as pd
 
 from psng.data import SignalData
 from psng.edf import load_channel
-from psng.events import EVENT_COLUMNS
+from psng.events import EVENT_COLUMNS, flow_envelope
 from psng.plots import save_examples_grid
 from psng.settings import Settings
 from psng.windows import WindowPreprocessor
@@ -35,6 +35,12 @@ class Recording:
         summary = json.loads((stage_dir / "events.json").read_text(encoding="utf-8")) if (stage_dir / "events.json").exists() else {}
         self.baseline = float(summary.get("baseline_amplitude") or 1.0)
         self.filter = WindowPreprocessor(self.signal.sfreq, settings.data.smoothing_seconds).filter
+        self._envelopes: dict[float, pd.DataFrame] = {}
+
+    def envelope(self, smoothing_seconds: float) -> pd.DataFrame:
+        if smoothing_seconds not in self._envelopes:
+            self._envelopes[smoothing_seconds] = flow_envelope(self.signal, smoothing_seconds)
+        return self._envelopes[smoothing_seconds]
 
     def slice(self, start: float, end: float, label: str, window: tuple[float, float] | None = None) -> dict:
         s = self.signal

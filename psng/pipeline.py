@@ -114,7 +114,8 @@ class Pipeline:
         frame["event"] = window_event_labels(starts, ends, events, self.settings.events.min_overlap_seconds)
         if hypnogram is not None:
             frame["stage"] = window_stages(starts, ends, hypnogram)
-        summary = event_summary(self.stage, events, frame["event"].to_numpy(object), None, signal.duration, baseline, hypnogram)
+        summary = event_summary(self.stage, events, frame["event"].to_numpy(object), None, signal.duration, baseline, hypnogram,
+                                start_seconds=signal.start_time)
         if desaturations is not None:
             summary = summary.model_copy(update=oximetry_summary(events, desaturations, summary.sleep_hours, hypnogram, self.settings.oximetry))
             self.log.info("oximetry: desaturations=%d odi=%s confirmed events=%s ahi (confirmed hypopneas)=%s", summary.desaturations,
@@ -123,7 +124,7 @@ class Pipeline:
         self.log.info("events: apnea=%d hypopnea=%d artefact=%d events/hour=%.1f ahi=%s event windows=%.1f%% (baseline amplitude %.3g)",
                       summary.apnea, summary.hypopnea, summary.artefact, summary.events_per_hour,
                       None if summary.ahi is None else f"{summary.ahi:.1f}", 100 * summary.event_window_fraction, baseline)
-        self.hmm_detector(envelope, desaturations, hypnogram, frame, signal.duration, baseline)
+        self.hmm_detector(envelope, desaturations, hypnogram, frame, signal.duration, baseline, start_seconds=signal.start_time)
         night = "Night 1 (training)" if self.stage == "training" else "Night 2 (validation)"
         save_events_overview(envelope, events, hypnogram, baseline, f"{night} at a glance: breathing, events, oxygen and sleep", self.paths.plots / "events.png", spo2=spo2,
                              baselines=baseline_variants(envelope["envelope"].to_numpy(float), self.settings.events))
@@ -149,9 +150,15 @@ class Pipeline:
         return series, desaturations
 
     def hmm_detector(self, envelope: pd.DataFrame, desaturations: pd.DataFrame | None, hypnogram: pd.DataFrame | None,
-                     frame: pd.DataFrame, duration: float, baseline: float) -> pd.DataFrame:
+                     frame: pd.DataFrame, duration: float, baseline: float, start_seconds: float = 0.0) -> pd.DataFrame:
         """HMM events of the stage (hmm_events.csv / .json); the model is fitted on training and only applied to validation."""
-        path, key = self.paths.models / "hmm.pkl", {"hmm": self.settings.hmm.model_dump(), "events": self.settings.events.model_dump()}
+        path = self.paths.models / "hmm.pkl"
+        key = {
+            "hmm": self.settings.hmm.model_dump(),
+            "events": self.settings.events.model_dump(),
+            "smoothing_seconds": self.settings.data.smoothing_seconds,
+            "training": self.settings.segment("training").model_dump(mode="json", exclude={"hypnogram_path"}),
+        }
         model = GaussianHMM.load(path) if path.exists() else None
         if model is None and self.stage == "validation":
             raise FileNotFoundError(f"no trained HMM {path}; run training first")
@@ -168,7 +175,7 @@ class Pipeline:
         events.to_csv(self.paths.hmm_events, index=False)
         starts, ends = frame[META_COLUMNS[0]].to_numpy(float), frame[META_COLUMNS[1]].to_numpy(float)
         labels = window_event_labels(starts, ends, events, self.settings.events.min_overlap_seconds)
-        summary = event_summary(self.stage, events, labels, None, duration, baseline, hypnogram)
+        summary = event_summary(self.stage, events, labels, None, duration, baseline, hypnogram, start_seconds=start_seconds)
         if desaturations is not None:
             summary = summary.model_copy(update=oximetry_summary(events, desaturations, summary.sleep_hours, hypnogram, self.settings.oximetry))
         self.paths.hmm_summary.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
@@ -197,7 +204,11 @@ class Pipeline:
 
         if done < len(starts):
             preprocess = WindowPreprocessor(signal.sfreq, cfg.smoothing_seconds, scale=scale)
-            extractor = make_extractor(self.settings.features.extractor, signal.sfreq)
+            extractor_kwargs = (
+                {"hypopnea_ratio": self.settings.events.hypopnea_ratio, "apnea_ratio": self.settings.events.apnea_ratio}
+                if self.settings.features.extractor == "respiratory" else {}
+            )
+            extractor = make_extractor(self.settings.features.extractor, signal.sfreq, **extractor_kwargs)
             self.log.info("extracting %s features for %d windows (%s scaling%s)", self.settings.features.extractor, len(starts) - done,
                           cfg.normalisation, "" if scale is None else f", baseline {scale:.3g}")
             t0 = time.perf_counter()
@@ -225,14 +236,19 @@ class Pipeline:
     # -------------------------------------------------------------- transformer
     def transformer(self, features: pd.DataFrame) -> FeatureTransformer:
         path = self.paths.models / "feature_transformer.pkl"
+        key = self.settings.training_key()
         if path.exists():
             transformer = FeatureTransformer.load(path)
-            if transformer.cfg == self.settings.features and (self.stage == "validation" or self.resume):
+            if self.stage == "validation" and transformer.cfg == self.settings.features:
+                self.log.info("loaded feature transformer from %s (columns=%s)", path, transformer.output_columns)
+                return transformer
+            if self.stage == "training" and self.resume and getattr(transformer, "key_", None) == key:
                 self.log.info("loaded feature transformer from %s (columns=%s)", path, transformer.output_columns)
                 return transformer
         if self.stage == "validation":
             raise FileNotFoundError(f"no feature transformer matching current settings in {path}; run training first")
         transformer = FeatureTransformer(self.settings.features).fit(features)
+        transformer.key_ = key
         transformer.save(path)
         self.log.info("fitted feature transformer: selected=%s output=%s", transformer.columns_, transformer.output_columns)
         return transformer
@@ -279,17 +295,19 @@ class Pipeline:
         return names
 
     def _model(self, name: str, params: dict, X: np.ndarray, path: Path) -> tuple[Clusterer, float, bool]:
+        key = (self.settings.training_key(), self.settings.events.model_dump(mode="json"))
         if path.exists():
             model = Clusterer.load(path)
             if self.stage == "validation":
                 return model, 0.0, True
-            if self.resume and model.params == params:
+            if self.resume and model.params == params and getattr(model, "key_", None) == key:
                 self.log.info("%s: resumed fitted model from %s", name, path)
                 return model, 0.0, True
         elif self.stage == "validation":
             raise FileNotFoundError(f"no trained model {path}; run training first")
         t0 = time.perf_counter()
         model = make_clusterer(name, params).fit(X)
+        model.key_ = key
         model.save(path)
         return model, time.perf_counter() - t0, False
 
@@ -300,12 +318,18 @@ def _fmt(value: float | None) -> str:
 
 def _valid_cached_rows(path: Path, expected_starts: np.ndarray) -> int:
     """Keep the longest cache prefix whose rows are complete and match the expected windows."""
-    if not path.exists():
+    if not path.exists() or path.stat().st_size == 0:
         return 0
-    cached = pd.read_csv(path, on_bad_lines="skip")
+    try:
+        cached = pd.read_csv(path, on_bad_lines="skip")
+    except pd.errors.EmptyDataError:
+        return 0
+    if cached.empty or META_COLUMNS[0] not in cached.columns:
+        return 0
     n = min(len(cached), len(expected_starts))
     head = cached.iloc[:n]
-    ok = np.isclose(head[META_COLUMNS[0]].to_numpy(float), expected_starts[:n]) & head.iloc[:, -1].notna().to_numpy()
+    starts = pd.to_numeric(head[META_COLUMNS[0]], errors="coerce").to_numpy(float)
+    ok = np.isfinite(starts) & np.isclose(starts, expected_starts[:n]) & head.iloc[:, -1].notna().to_numpy()
     valid = n if ok.all() else int(np.argmin(ok))
     if valid != len(cached):
         cached.iloc[:valid].to_csv(path, index=False)

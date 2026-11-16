@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Stage = Literal["training", "validation"]
 
@@ -74,6 +74,14 @@ class EventSettings(BaseModel):
     kalman_process_ratio: float = Field(1e-5, gt=0)  # kalman: process / measurement noise variance (smaller = slower level)
     min_overlap_seconds: float = Field(5.0, ge=0)  # a window is labelled with an event it overlaps at least this long
 
+    @model_validator(mode="after")
+    def _valid_thresholds(self) -> EventSettings:
+        if self.apnea_ratio >= self.hypopnea_ratio:
+            raise ValueError(f"apnea_ratio ({self.apnea_ratio}) must be smaller than hypopnea_ratio ({self.hypopnea_ratio})")
+        if self.min_seconds > self.max_seconds:
+            raise ValueError(f"min_seconds ({self.min_seconds}) cannot exceed max_seconds ({self.max_seconds})")
+        return self
+
 
 class OximetrySettings(BaseModel):
     """SpO2 desaturations (`psng/oximetry.py`): an airflow-independent reference for the breathing events."""
@@ -85,6 +93,12 @@ class OximetrySettings(BaseModel):
     lookback_seconds: float = Field(60.0, gt=0)  # window of that preceding maximum
     min_seconds: float = Field(3.0, gt=0)  # minimum desaturation duration
     lag_seconds: float = Field(45.0, ge=0)  # a nadir up to this long after an event end confirms the event (circulation delay)
+
+    @model_validator(mode="after")
+    def _valid_bounds(self) -> OximetrySettings:
+        if self.valid_range[0] >= self.valid_range[1]:
+            raise ValueError(f"valid_range must be (low, high) with low < high, got {self.valid_range}")
+        return self
 
 
 class HmmSettings(BaseModel):
@@ -136,9 +150,22 @@ class Settings(BaseModel):
 
     def feature_key(self, stage: Stage) -> str:
         """Hash of everything that determines the extracted features of a stage."""
-        payload = {
+        payload: dict[str, Any] = {
             "segment": self.segment(stage).model_dump(mode="json", exclude={"hypnogram_path"}),
             "data": self.data.model_dump(mode="json", exclude={"training", "validation"}),
             "extractor": self.features.extractor,
+        }
+        if self.features.extractor == "respiratory":
+            payload["event_ratios"] = {
+                "apnea_ratio": self.events.apnea_ratio,
+                "hypopnea_ratio": self.events.hypopnea_ratio,
+            }
+        return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+
+    def training_key(self) -> str:
+        """Hash of everything upstream of feature transformation (training signal + extractor)."""
+        payload = {
+            "feature_key": self.feature_key("training"),
+            "features": self.features.model_dump(mode="json"),
         }
         return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
